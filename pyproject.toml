@@ -1,0 +1,18 @@
+[project]
+name = "server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "flask[async]>=3.1.0",
+    "flask-sock>=0.7.0",
+    "gunicorn>=23.0.0",
+    "flask-socketio>=5.5.1",
+    "python-socketio>=5.13.0",
+    "requests>=2.32.3",
+    "gevent>=25.4.2",
+    "selectolax>=0.3.29",
+    "orjson>=3.10.18",
+    "price-parser>=0.4.0",
+]
