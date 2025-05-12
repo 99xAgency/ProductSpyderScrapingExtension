@@ -64,6 +64,7 @@ function connect() {
   };
 
   ws.onclose = function (e) {
+    isConnected = false;
     console.log(
       "Socket is closed. Reconnect will be attempted in 1 second.",
       e.reason
@@ -77,6 +78,7 @@ function connect() {
 
   ws.onerror = function (err) {
     console.log(err);
+    isConnected = false;
     ws.close();
   };
 }
