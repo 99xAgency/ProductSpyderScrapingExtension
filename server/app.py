@@ -1,16 +1,16 @@
 import json
 import queue
 import threading
+import uuid
 
 from custom_extractors import EXTRACTOR_DICT
+from extractors import extract_product_info
 from flask import Flask, jsonify, request
 from flask_sock import Sock
 from gevent import monkey
 from gevent.pywsgi import WSGIServer
 from selectolax.lexbor import LexborHTMLParser
 from substring_processor import extract_domain_name
-
-from extractors import extract_product_info
 
 monkey.patch_all()
 
@@ -19,17 +19,28 @@ sock = Sock(app)
 
 
 client_list = []
-data_queue = queue.Queue()
-
-extract_data_lock = threading.Lock()
+response_queues = {}
+response_lock = threading.Lock()
 
 
 @sock.route("/ws")
 def echo(sock):
     client_list.append(sock)
     while True:
-        data = sock.receive()
-        data_queue.put((sock, data))
+        try:
+            data = sock.receive()
+            parsed_data = json.loads(data)
+
+            if "request_id" in parsed_data:
+                request_id = parsed_data["request_id"]
+                with response_lock:
+                    if request_id in response_queues:
+                        response_queues[request_id].put(parsed_data)
+        except Exception as e:
+            print(f"Error with websocket: {e}")
+            if sock in client_list:
+                client_list.remove(sock)
+            break
 
 
 @app.route("/extract-data", methods=["POST"])
@@ -37,39 +48,63 @@ def extract_data():
     print("Extracting data")
 
     urls = request.json
+
+    # Create a unique request ID
+    request_id = str(uuid.uuid4())
+
+    # Create a queue for this specific request
+    with response_lock:
+        response_queues[request_id] = queue.Queue()
+
     successfull_send = 0
-    for client in client_list:
+    for client in client_list[:]:  # Create a copy of the list to safely iterate
         print("Sending to client")
         try:
-            client.send(json.dumps({"type": "extractHtml", "urls": urls}))
+            client.send(json.dumps({"type": "extractHtml", "urls": urls, "request_id": request_id}))
             successfull_send += 1
         except Exception:
             print("Removing client")
-            client_list.remove(client)
+            if client in client_list:
+                client_list.remove(client)
 
     print(f"Successfully sent to {successfull_send} clients")
 
     if successfull_send == 0:
+        # Clean up the queue if no clients are available
+        with response_lock:
+            if request_id in response_queues:
+                del response_queues[request_id]
         return jsonify({"error": "No client available"}), 500
 
-    print("Waiting for data")
+    print(f"Waiting for data for request {request_id}")
 
-    _, data = data_queue.get(timeout=300)
-    print(data)
+    try:
+        # Wait for response with timeout
+        with response_lock:
+            response_queue = response_queues[request_id]
 
-    parsed_data = json.loads(data)
+        parsed_data = response_queue.get(timeout=300)
 
-    product_info = []
+        product_info = []
 
-    for url, html in zip(urls, parsed_data["htmls"]):
-        domain = extract_domain_name(url)
-        extractor = extract_product_info
-        if domain in EXTRACTOR_DICT:
-            extractor = EXTRACTOR_DICT[domain]
-        parser = LexborHTMLParser(html)
-        product_info.append(extractor(parser, url))
+        for url, html in zip(urls, parsed_data["htmls"]):
+            domain = extract_domain_name(url)
+            extractor = extract_product_info
+            if domain in EXTRACTOR_DICT:
+                extractor = EXTRACTOR_DICT[domain]
+            parser = LexborHTMLParser(html)
+            product_info.append(extractor(parser, url))
 
-    return jsonify(product_info)
+        return jsonify(product_info)
+
+    except queue.Empty:
+        return jsonify({"error": "Request timed out"}), 504
+
+    finally:
+        # Clean up the queue after processing
+        with response_lock:
+            if request_id in response_queues:
+                del response_queues[request_id]
 
 
 if __name__ == "__main__":

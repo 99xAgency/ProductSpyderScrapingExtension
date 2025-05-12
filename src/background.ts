@@ -49,16 +49,17 @@ function connect() {
   };
 
   ws.onmessage = async (e) => {
-    const data = JSON.parse(e.data);
-    if (data.type == "extractHtml") {
+    const { type, urls, request_id } = JSON.parse(e.data);
+    if (type == "extractHtml") {
       console.log("Received extractHtml request");
       let mergedData = [];
-      for (const url of data.urls) {
+      for (const url of urls) {
         mergedData.push(await extractHtml(url));
       }
-      console.log(mergedData);
       console.log("Sending extractHtml response");
-      ws.send(JSON.stringify({ type: "extractHtml", htmls: mergedData }));
+      ws.send(
+        JSON.stringify({ type: "extractHtml", htmls: mergedData, request_id })
+      );
     }
   };
 

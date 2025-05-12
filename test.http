@@ -1,0 +1,7 @@
+
+POST https://scraper1.pricespy.ai/extract-data
+Content-Type: application/json
+
+[
+    "https://www.amazon.com.au/dp/B0BZM9MG77"
+]
