@@ -39,51 +39,45 @@ const extractHtml = async (url: string) => {
   return html[0].result;
 };
 
-function connect() {
-  const ws = new WebSocket("ws://127.0.0.1:9999/ws");
-  let isConnected = false;
+let ws = new WebSocket("ws://127.0.0.1:9999/ws");
+let isConnected = false;
 
-  ws.onopen = function () {
-    isConnected = true;
-    console.log("Connected to server");
-  };
+const onOpen = () => {
+  isConnected = true;
+  console.log("Connected to server");
+};
 
-  ws.onmessage = async (e) => {
-    const { type, urls, request_id } = JSON.parse(e.data);
-    if (type == "extractHtml") {
-      console.log("Received extractHtml request");
-      let mergedData = [];
-      for (const url of urls) {
-        mergedData.push(await extractHtml(url));
-      }
-      console.log("Sending extractHtml response");
-      ws.send(
-        JSON.stringify({ type: "extractHtml", htmls: mergedData, request_id })
-      );
+const onMessage = async (e: MessageEvent) => {
+  const { type, urls, request_id } = JSON.parse(e.data);
+  if (type == "extractHtml") {
+    console.log("Received extractHtml request");
+    let mergedData = [];
+    for (const url of urls) {
+      mergedData.push(await extractHtml(url));
     }
-  };
-
-  ws.onclose = function (e) {
-    isConnected = false;
-    console.log(
-      "Socket is closed. Reconnect will be attempted in 1 second.",
-      e.reason
+    console.log("Sending extractHtml response");
+    ws.send(
+      JSON.stringify({ type: "extractHtml", htmls: mergedData, request_id })
     );
-    setInterval(function () {
-      if (!isConnected) {
-        connect();
-      }
-    }, 1000);
-  };
+  }
+};
 
-  ws.onerror = function (err) {
-    console.log(err);
-    isConnected = false;
-    ws.close();
-  };
-}
+const onClose = () => {
+  isConnected = false;
+  console.log("Socket is closed. Reconnect will be attempted in 1 second.");
+  setInterval(() => {
+    if (!isConnected) {
+      ws.close();
+      ws = new WebSocket("ws://127.0.0.1:9999/ws");
+      ws.onopen = onOpen;
+      ws.onmessage = onMessage;
+      ws.onclose = onClose;
+    }
+  }, 1000);
+};
 
-connect();
+ws.onopen = onOpen;
+ws.onmessage = onMessage;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "ping") {
