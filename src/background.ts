@@ -39,45 +39,68 @@ const extractHtml = async (url: string) => {
   return html[0].result;
 };
 
-let ws = new WebSocket("ws://127.0.0.1:9999/ws");
-let isConnected = false;
+class WebSocketManager {
+  url: string;
+  ws: WebSocket | null;
+  reconnectDelay: number;
 
-const onOpen = () => {
-  isConnected = true;
-  console.log("Connected to server");
-};
-
-const onMessage = async (e: MessageEvent) => {
-  const { type, urls, request_id } = JSON.parse(e.data);
-  if (type == "extractHtml") {
-    console.log("Received extractHtml request");
-    let mergedData = [];
-    for (const url of urls) {
-      mergedData.push(await extractHtml(url));
-    }
-    console.log("Sending extractHtml response");
-    ws.send(
-      JSON.stringify({ type: "extractHtml", htmls: mergedData, request_id })
-    );
+  constructor(url: string) {
+    this.url = url;
+    this.ws = null;
+    this.reconnectDelay = 1000;
+    this.connect();
   }
-};
 
-const onClose = () => {
-  isConnected = false;
-  console.log("Socket is closed. Reconnect will be attempted in 1 second.");
-  setInterval(() => {
-    if (!isConnected) {
-      ws.close();
-      ws = new WebSocket("ws://127.0.0.1:9999/ws");
-      ws.onopen = onOpen;
-      ws.onmessage = onMessage;
-      ws.onclose = onClose;
+  connect() {
+    this.ws = new WebSocket(this.url);
+
+    this.ws.onopen = () => {
+      console.log("WebSocket connected");
+    };
+
+    this.ws.onmessage = async (event) => {
+      const { type, urls, request_id } = JSON.parse(event.data);
+      if (type == "extractHtml") {
+        console.log("Received extractHtml request");
+        let mergedData = [];
+        for (const url of urls) {
+          mergedData.push(await extractHtml(url));
+        }
+        console.log("Sending extractHtml response");
+        this.send(
+          JSON.stringify({ type: "extractHtml", htmls: mergedData, request_id })
+        );
+      }
+    };
+
+    this.ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
+
+    this.ws.onclose = () => {
+      console.log(`Reconnecting in ${this.reconnectDelay}ms...`);
+      setTimeout(() => {
+        this.connect();
+      }, this.reconnectDelay);
+    };
+  }
+
+  send(data: string) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(data);
+    } else {
+      console.warn("WebSocket not connected");
     }
-  }, 1000);
-};
+  }
 
-ws.onopen = onOpen;
-ws.onmessage = onMessage;
+  close() {
+    if (this.ws) {
+      this.ws.close();
+    }
+  }
+}
+
+new WebSocketManager("ws://127.0.0.1:9999/ws");
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "ping") {
