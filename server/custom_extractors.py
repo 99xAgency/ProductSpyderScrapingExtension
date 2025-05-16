@@ -118,4 +118,5 @@ EXTRACTOR_DICT = {
     "kogan": kogan_extractor,
     "mydeal": mydeal_extractor,
     "bunnings": bunnings_extractor,
+    "bcf": bcf_extractor,
 }
