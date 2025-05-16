@@ -12,6 +12,9 @@ def get_text_or_none(element):
     return None
 
 
+# Marketplace extractors
+
+
 def dicksmith_extractor(parser: LexborHTMLParser, url: str):
     product_info = extract_product_info(parser, url)
     seller_a = parser.css_first("a[data-discover='true']")
@@ -93,6 +96,9 @@ def bunnings_extractor(parser: LexborHTMLParser, url: str):
     return product_info
 
 
+# Custom Extractors
+
+
 def bcf_extractor(parser: LexborHTMLParser, url: str):
     product_info = extract_product_info(parser, url)
     last_part_of_url = url.split("/")[-1]
@@ -111,6 +117,16 @@ def bcf_extractor(parser: LexborHTMLParser, url: str):
     return product_info
 
 
+def chsmith_extractor(parser: LexborHTMLParser, url: str):
+    product_info = extract_product_info(parser, url)
+    specs_tr = parser.css_matches("#product-attribute-specs-table tr")
+    for tr in specs_tr:
+        key = tr.css_first("th").text()
+        value = tr.css_first("td").text()
+        product_info[key] = value
+    return product_info
+
+
 EXTRACTOR_DICT = {
     "dicksmith": dicksmith_extractor,
     "amazon": amazon_extractor,
@@ -119,4 +135,5 @@ EXTRACTOR_DICT = {
     "mydeal": mydeal_extractor,
     "bunnings": bunnings_extractor,
     "bcf": bcf_extractor,
+    "chsmith": chsmith_extractor,
 }
