@@ -1,9 +1,9 @@
 import re
 
+from curl_cffi import requests
+from extractors import extract_product_info
 from price_parser import Price
 from selectolax.lexbor import LexborHTMLParser
-
-from extractors import extract_product_info
 
 
 def get_text_or_none(element):
@@ -90,6 +90,24 @@ def bunnings_extractor(parser: LexborHTMLParser, url: str):
     seller = parser.css_first("a[data-locator='sellerName']")
     if seller:
         product_info["seller"] = seller.text()
+    return product_info
+
+
+def bcf_extractor(parser: LexborHTMLParser, url: str):
+    product_info = extract_product_info(parser, url)
+    last_part_of_url = url.split("/")[-1]
+    product_id = last_part_of_url.split(".")[0]
+
+    try:
+        response = requests.get(
+            f"https://apps.bazaarvoice.com/api/data/products.json?passkey=caiXwE96iTtmnYMqwqEvrNnPXXaLiIYEReuQk3eGoGfPc&locale=en_AU&allowMissing=true&apiVersion=5.4&filter=id:{product_id}"
+        )
+        response.raise_for_status()
+        data = response.json()
+        product_info["gtin"] = data["Results"][0]["EANs"][0]
+    except Exception:
+        pass
+
     return product_info
 
 
