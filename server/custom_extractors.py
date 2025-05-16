@@ -119,11 +119,12 @@ def bcf_extractor(parser: LexborHTMLParser, url: str):
 
 def chsmith_extractor(parser: LexborHTMLParser, url: str):
     product_info = extract_product_info(parser, url)
-    specs_tr = parser.css_matches("#product-attribute-specs-table tr")
+    specs_tr = parser.css("#product-attribute-specs-table tr")
     for tr in specs_tr:
         key = tr.css_first("th").text()
         value = tr.css_first("td").text()
-        product_info[key] = value
+        if key in ["MPN", "UPC"]:
+            product_info[key] = value
     return product_info
 
 
