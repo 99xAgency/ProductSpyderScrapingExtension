@@ -126,7 +126,7 @@ def chsmith_extractor(parser: LexborHTMLParser, url: str):
         if key in ["MPN", "UPC"]:
             product_info[key] = value
 
-    sku = get_text_or_none(parser.css_first("span.sku.value"))
+    sku = get_text_or_none(parser.css_first("div.sku > span.value"))
     if sku:
         product_info["sku"] = sku
 
