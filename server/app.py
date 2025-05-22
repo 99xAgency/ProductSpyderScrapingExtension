@@ -94,7 +94,7 @@ def extract_data():
             if domain in EXTRACTOR_DICT:
                 extractor = EXTRACTOR_DICT[domain]
             parser = LexborHTMLParser(html)
-            product_info = extractor(parser)
+            product_info = extractor(parser, url)
             product_info["page_data"] = extract_page_info(parser)
             product_infos.append(product_info)
 
