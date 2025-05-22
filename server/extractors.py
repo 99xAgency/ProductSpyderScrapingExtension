@@ -57,6 +57,7 @@ IMAGE_META = ",".join(
         "meta[property='og:image:secure_url']",
         "meta[property='og:image:secure_url']",
         ".woocommerce-product-gallery__image img",
+        "img[itemprop='image']",
     ]
 )
 
@@ -66,6 +67,13 @@ AVAILABILITY_META = ",".join(
         "meta[property='availability']",
         "meta[property='product:availability']",
         "meta[property='availability']",
+    ]
+)
+
+
+SKU_META = ",".join(
+    [
+        "meta[itemprop='sku']",
     ]
 )
 
@@ -361,11 +369,14 @@ def extract_from_meta_tags(parser, url):
     title_meta = parser.css_first(TITLE_META)
     image_meta = parser.css_first(IMAGE_META)
     availability_meta = parser.css_first(AVAILABILITY_META)
+    sku_meta = parser.css_first(SKU_META)
 
+    title = parser.css_first("title").text()
     price = None
     currency = ""
     images = []
     availability = ""
+    sku = ""
 
     if currency_meta:
         currency = currency_meta.attributes.get("content") or currency_meta.text()
@@ -377,9 +388,12 @@ def extract_from_meta_tags(parser, url):
         title = title_meta.attributes.get("content") or title_meta.text()
 
     if image_meta:
-        image = image_meta.attributes.get("content") or image_meta.text()
+        image = image_meta.attributes.get("content") or image_meta.text() or image_meta.attributes.get("src")
         image = format_resource_url(image, url)
         images = [image]
+
+    if sku_meta:
+        sku = sku_meta.attributes.get("content") or sku_meta.text()
 
     if availability_meta:
         availability = availability_meta.attributes.get("content") or availability_meta.text
@@ -394,7 +408,7 @@ def extract_from_meta_tags(parser, url):
             {
                 "name": title,
                 "variant_id": "",
-                "sku": "",
+                "sku": sku,
                 "mpn": "",
                 "upc": "",
                 "price": price,
