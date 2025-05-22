@@ -2,7 +2,6 @@ import re
 import xml.etree.ElementTree as ET
 
 import orjson
-from selectolax.lexbor import LexborHTMLParser
 
 # --- Constants from extract_data.py (if not defined elsewhere) ---
 PRICE_META = ",".join(
@@ -52,6 +51,29 @@ SKU_META = ",".join(
         "meta[property='product:retailer_item_id']",
     ]
 )
+
+# --- Product Description Selectors ---
+DESCRIPTION_SELECTORS = [
+    'meta[itemprop="description"]',  # Schema.org Microdata/RDFa Lite
+    'meta[property="og:description"]',  # Open Graph
+    'meta[name="description"]',  # Standard meta description
+    'div[itemprop="description"]',  # Schema.org Microdata/RDFa Lite (block element)
+    "div.woocommerce-product-details__short-description",  # WooCommerce
+    'div.product-single__description[itemprop="description"]',  # Shopify common
+    'div.product__description[itemprop="description"]',  # Shopify common (often with BEM)
+    'div.rte[itemprop="description"]',  # Shopify Rich Text Editor content
+    ".product-description",
+    ".product_description",
+    "#description .std",  # Magento common
+    ".short-description .std",  # Magento common
+    'div.tab-content[id*="description"] .std',  # Common in tabbed layouts
+    "div#tab-description .product-description-tab",  # Another tabbed layout pattern
+    "div.description",
+    "div#product-description",
+    "div.pdp-product-description",  # Common PDP (Product Detail Page) class
+    "div.product__description",  # BEM-style, may overlap with Shopify specific
+    "[data-product-description]",  # Generic data attribute selector
+]
 
 
 # --- Helper for JSON cleaning ---
@@ -453,6 +475,52 @@ def extract_og_meta_data(parser):
             result_data["structured"]["title"] = title_el.text(strip=True)
 
     return result_data if result_data["og"] or result_data["product"] or result_data["structured"] else None
+
+
+def extract_product_description(parser):
+    """
+    Extracts the product description from various common HTML elements and meta tags.
+    Tries selectors in a specific order of preference.
+
+    Args:
+        parser: LexborHTMLParser instance
+
+    Returns:
+        dict: A dictionary containing the product description under the key "product_description",
+              or None if no description is found.
+    """
+    for selector in DESCRIPTION_SELECTORS:
+        element = parser.css_first(selector)
+        if element:
+            description_text = ""
+            if element.tag == "meta":
+                description_text = element.attributes.get("content", "").strip()
+            else:
+                # Try text content first
+                description_text = element.text(strip=True)
+                # If text is empty, but a 'data-product-description' attribute is present on the element, use it.
+                # This is particularly useful if the selector itself was '[data-product-description]'
+                # or if an element matched by class/id primarily stores its description in this attribute.
+                if not description_text and element.attributes.get("data-product-description"):
+                    description_text = element.attributes.get("data-product-description", "").strip()
+
+            if description_text:
+                # Basic cleaning: replace multiple whitespace chars (including newlines) with a single space,
+                # then collapse multiple newlines (if any were preserved or introduced) to a single newline.
+                description_text = re.sub(
+                    r"\s+", " ", description_text
+                ).strip()  # Consolidates all whitespace to single spaces
+                # If you want to preserve paragraph breaks (double newlines -> single newline)
+                # this step might need to be more nuanced or happen before \s+ consolidation.
+                # For now, this gives a single line or space-separated text.
+                # To preserve some newlines (e.g., paragraphs), a more complex cleaning is needed.
+                # A common approach for simpler cleaning:
+                description_text_cleaned = re.sub(r"\s{2,}", " ", description_text).strip()
+                description_text_cleaned = re.sub(r"(\n\s*){2,}", "\n", description_text_cleaned).strip()
+
+                if description_text_cleaned:
+                    return {"product_description": description_text_cleaned}
+    return None
 
 
 def extract_facebook_pixel_data(parser):
@@ -987,8 +1055,8 @@ def extract_magento_data(parser):
         q = [obj_data]
         while q:
             curr = q.pop(0)
-            for k, v_item in curr.items():  # Renamed v to v_item
-                if any(term in str(k).lower() for term in product_terms):
+            for k_item, v_item in curr.items():  # Renamed v to v_item
+                if any(term in str(k_item).lower() for term in product_terms):
                     return True
                 if isinstance(v_item, dict):
                     q.append(v_item)
@@ -2594,27 +2662,28 @@ def extract_page_info(parser):
 
     extractors_to_run = [
         (extract_skus, "sku_data"),
-        (extract_gtm4wp_product_data, "gtm4wp_product_data"),  # Use key_name
-        (extract_drip_data, "drip_tracking_data"),  # Use key_name
+        (extract_gtm4wp_product_data, "gtm4wp_product_data"),
+        (extract_drip_data, "drip_tracking_data"),
         (extract_gsf_conversion_data, "gsf_conversion_data"),
         (extract_shopify_analytics_data, "shopify_analytics"),
         (extract_variants_json, "variants_json_data"),
         (extract_bc_data, "bc_data"),
         (extract_wpm_data_layer, "wpm_data_layer"),
-        (extract_gtm_datalayer, "gtm_datalayer_pushes"),  # Use key_name
+        (extract_gtm_datalayer, "gtm_datalayer_pushes"),
         (extract_gtm_update_datalayer, "gtm_update_datalayer"),
         (extract_ga4_update_datalayer, "ga4_update_datalayer"),
         (extract_gtag_event_data, "gtag_event_data"),
         (extract_shopify_web_pixels_data, "shopify_web_pixels"),
         (extract_og_meta_data, "meta_data"),
-        (extract_facebook_pixel_data, "facebook_pixel_events"),  # Use key_name
+        (extract_product_description, "product_description"),  # ADDED HERE
+        (extract_facebook_pixel_data, "facebook_pixel_events"),
         (extract_dmpt_data, "dmpt_data"),
         (extract_klaviyo_viewed_product, "klaviyo_viewed_product"),
         (extract_drip_product_view, "drip_product_view_data"),
-        (extract_rivo_data, "rivo_data"),  # Use key_name
+        (extract_rivo_data, "rivo_data"),
         (extract_shopify_tracking_events, "shopify_tracking_events"),
-        (extract_afterpay_data, "afterpay_data"),  # Use key_name
-        # (extract_microdata_schema_org, "microdata_schema_org"),
+        (extract_afterpay_data, "afterpay_data"),
+        (extract_microdata_schema_org, "microdata_schema_org"),  # Ensure this is intended to be run, or keep commented
         (extract_rdfa_lite_data, "rdfa_lite_data"),
         (extract_woocommerce_deeper_data, "woocommerce_data"),
         (extract_magento_data, "magento_data"),
@@ -2665,11 +2734,12 @@ def extract_page_info(parser):
             print(f"Critical error in {func.__name__}: {e}")  # For unexpected errors
 
     # JSON-LD specific handling (depends on extract_json_ld_data result)
-    json_ld_list = extract_json_ld_data(parser)  # Renamed var
-    if json_ld_list:
-        combined_results["json_ld_documents"] = json_ld_list  # Renamed key
-        json_ld_product_extracted = extract_product_from_json_ld(json_ld_list)  # Renamed var
-        if json_ld_product_extracted:
-            combined_results["json_ld_extracted_product"] = json_ld_product_extracted  # Renamed key
+    json_ld_list_data = extract_json_ld_data(parser)  # Renamed var to avoid conflict
+    if json_ld_list_data:  # Check if data is not None
+        combined_results["json_ld_documents"] = json_ld_list_data
+        # Pass the extracted list to product extractor
+        json_ld_product_extracted_data = extract_product_from_json_ld(json_ld_list_data)
+        if json_ld_product_extracted_data:  # Check if data is not None
+            combined_results["json_ld_extracted_product"] = json_ld_product_extracted_data
 
     return combined_results

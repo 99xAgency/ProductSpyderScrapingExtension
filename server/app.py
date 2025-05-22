@@ -95,7 +95,7 @@ def extract_data():
                 extractor = EXTRACTOR_DICT[domain]
             parser = LexborHTMLParser(html)
             product_info = extractor(parser, url)
-            product_info["page_data"] = extract_page_info(parser)
+            product_info["page_info"] = extract_page_info(parser)
             product_infos.append(product_info)
 
         return jsonify(product_infos)
