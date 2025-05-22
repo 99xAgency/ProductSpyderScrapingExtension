@@ -3,15 +3,10 @@ import queue
 import threading
 import uuid
 
-from comprehensive_extractors import extract_page_info
-from custom_extractors import EXTRACTOR_DICT
-from extractors import extract_product_info
 from flask import Flask, jsonify, request
 from flask_sock import Sock
 from gevent import monkey
 from gevent.pywsgi import WSGIServer
-from selectolax.lexbor import LexborHTMLParser
-from substring_processor import extract_domain_name
 
 monkey.patch_all()
 
@@ -44,7 +39,7 @@ def echo(sock):
             break
 
 
-@app.route("/extract-data", methods=["POST"])
+@app.route("/fetch", methods=["POST"])
 def extract_data():
     print("Extracting data")
 
@@ -86,19 +81,7 @@ def extract_data():
 
         parsed_data = response_queue.get(timeout=300)
 
-        product_infos = []
-
-        for url, html in zip(urls, parsed_data["htmls"]):
-            domain = extract_domain_name(url)
-            extractor = extract_product_info
-            if domain in EXTRACTOR_DICT:
-                extractor = EXTRACTOR_DICT[domain]
-            parser = LexborHTMLParser(html)
-            product_info = extractor(parser, url)
-            product_info["page_info"] = extract_page_info(parser)
-            product_infos.append(product_info)
-
-        return jsonify(product_infos)
+        return jsonify(parsed_data["htmls"])
 
     except queue.Empty:
         return jsonify({"error": "Request timed out"}), 504
