@@ -81,7 +81,7 @@ def extract_data():
 
         parsed_data = response_queue.get(timeout=300)
 
-        return jsonify(parsed_data["htmls"])
+        return jsonify(parsed_data["results"])
 
     except queue.Empty:
         return jsonify({"error": "Request timed out"}), 504

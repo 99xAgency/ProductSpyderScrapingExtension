@@ -13,6 +13,19 @@ const extractHtml = async (url: string) => {
     });
   };
 
+  const getStatusCode = (originalUrl: string) => {
+    if (window.location.href !== originalUrl) {
+      return 301;
+    }
+    const navigationEntries: any = performance.getEntriesByType("navigation");
+    if (navigationEntries.length > 0) {
+      const responseStatus = navigationEntries[0].responseStatus;
+      return responseStatus || 200;
+    } else {
+      return 200;
+    }
+  };
+
   console.log(`Processing: ${url}`);
 
   const tab = await chrome.tabs.create({ url });
@@ -38,7 +51,10 @@ const extractHtml = async (url: string) => {
 
   await chrome.tabs.remove(tab.id);
 
-  return html[0].result;
+  return {
+    html: html[0].result,
+    statusCode: getStatusCode(url),
+  };
 };
 
 class WebSocketManager {
@@ -70,7 +86,11 @@ class WebSocketManager {
         }
         console.log("Sending extractHtml response");
         this.send(
-          JSON.stringify({ type: "extractHtml", htmls: mergedData, request_id })
+          JSON.stringify({
+            type: "extractHtml",
+            results: mergedData,
+            request_id,
+          })
         );
       }
     };
