@@ -53,7 +53,7 @@ const extractHtml = async (url: string) => {
 
   const statusCode = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
-    func: () => getStatusCode(),
+    func: getStatusCode,
   });
 
   await chrome.tabs.remove(tab.id);
