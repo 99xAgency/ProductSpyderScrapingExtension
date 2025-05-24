@@ -223,7 +223,7 @@ class WebSocketManager {
         this.send(
           JSON.stringify({
             type: "extractHtml",
-            results: mergedData,
+            htmls: mergedData,
             request_id,
           })
         );
