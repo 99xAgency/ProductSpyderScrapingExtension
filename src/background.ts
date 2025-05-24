@@ -13,19 +13,6 @@ const extractHtml = async (url: string) => {
     });
   };
 
-  const getStatusCode = (originalUrl: string) => {
-    if (window.location.href !== originalUrl) {
-      return 301;
-    }
-    const navigationEntries: any = performance.getEntriesByType("navigation");
-    if (navigationEntries.length > 0) {
-      const responseStatus = navigationEntries[0].responseStatus;
-      return responseStatus || 200;
-    } else {
-      return 200;
-    }
-  };
-
   console.log(`Processing: ${url}`);
 
   const tab = await chrome.tabs.create({ url });
@@ -49,11 +36,39 @@ const extractHtml = async (url: string) => {
     func: () => document.documentElement.outerHTML,
   });
 
+  const statusCode = await new Promise<number>((resolve) => {
+    let isRedirected = false;
+
+    const redirectListener = (
+      details: chrome.webRequest.WebResponseHeadersDetails
+    ) => {
+      if (details.url === url) {
+        isRedirected = true;
+        chrome.webRequest.onBeforeRedirect.removeListener(redirectListener);
+      }
+    };
+
+    chrome.webRequest.onBeforeRedirect.addListener(redirectListener, {
+      urls: [url],
+    });
+
+    const listener = (details: chrome.webRequest.WebResponseCacheDetails) => {
+      if (details.url === url) {
+        chrome.webRequest.onCompleted.removeListener(listener);
+        chrome.webRequest.onBeforeRedirect.removeListener(redirectListener);
+        resolve(isRedirected ? 301 : details.statusCode);
+      }
+    };
+
+    chrome.webRequest.onCompleted.addListener(listener, { urls: [url] });
+    setTimeout(() => resolve(isRedirected ? 301 : 200), 10000);
+  });
+
   await chrome.tabs.remove(tab.id);
 
   return {
     html: html[0].result,
-    statusCode: getStatusCode(url),
+    statusCode,
   };
 };
 
