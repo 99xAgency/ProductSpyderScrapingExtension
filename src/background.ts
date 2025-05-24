@@ -13,10 +13,10 @@ const extractHtml = async (url: string) => {
     });
   };
 
-  const getStatusCode = () => {
+  const getStatusCode = (originalUrl: string) => {
     return new Promise((resolve) => {
       const currentUrl = window.location.href;
-      if (currentUrl !== url) {
+      if (currentUrl !== originalUrl) {
         resolve(301);
       }
       const entries: any = window.performance.getEntries();
@@ -54,6 +54,12 @@ const extractHtml = async (url: string) => {
   const statusCode = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: getStatusCode,
+    args: [url],
+  });
+
+  const currentUrl = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => window.location.href,
   });
 
   await chrome.tabs.remove(tab.id);
@@ -61,6 +67,7 @@ const extractHtml = async (url: string) => {
   return {
     html: html[0].result,
     statusCode: statusCode[0].result,
+    url: currentUrl[0].result,
   };
 };
 
