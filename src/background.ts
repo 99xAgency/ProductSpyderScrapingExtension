@@ -39,7 +39,7 @@ const extractHtml = async (url: string) => {
   await Promise.race([
     chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => waitForPageLoad(),
+      func: waitForPageLoad,
     }),
     new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
   ]);
@@ -60,7 +60,7 @@ const extractHtml = async (url: string) => {
 
   return {
     html: html[0].result,
-    statusCode,
+    statusCode: statusCode[0].result,
   };
 };
 
