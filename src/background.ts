@@ -60,7 +60,7 @@ const extractHtml = async (url: string) => {
       target: { tabId: tab.id },
       func: () => waitForPageLoad(),
     }),
-    new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+    new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
   ]);
 
   // Add human-like scrolling behavior
