@@ -1,4 +1,13 @@
-const extractHtml = async (url: string) => {
+const extractHtml = async (url: string, options: any = {}) => {
+  // Default options
+  const {
+    simulateHuman = true,
+    customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    timeout = 10000,
+    handleCaptcha = true,
+    active = false,
+  } = options;
+
   const waitForPageLoad = () => {
     return new Promise((resolve) => {
       if (document.readyState === "complete") {
@@ -13,21 +22,189 @@ const extractHtml = async (url: string) => {
     });
   };
 
+  const simulateHumanBehavior = () => {
+    // Simulate scrolling and mouse movements
+    return new Promise((resolve) => {
+      let scrolls = 0;
+      const maxScrolls = Math.floor(Math.random() * 5) + 3; // Random number of scrolls between 3-7
+
+      const scroll = () => {
+        if (scrolls >= maxScrolls) {
+          resolve(null);
+          return;
+        }
+
+        const scrollAmount = Math.floor(Math.random() * 400) + 100; // Random scroll between 100-500px
+        window.scrollBy(0, scrollAmount);
+        scrolls++;
+
+        // Random delay between scrolls (500-2000ms)
+        setTimeout(scroll, Math.floor(Math.random() * 1500) + 500);
+      };
+
+      // Initial delay before starting to scroll (1000-3000ms)
+      setTimeout(scroll, Math.floor(Math.random() * 2000) + 1000);
+    });
+  };
+
+  const handleCaptchas = () => {
+    // Basic detection of common CAPTCHA patterns
+    return new Promise((resolve) => {
+      // Check for common CAPTCHA elements
+      const hasCaptcha =
+        document.querySelector('iframe[src*="recaptcha"]') ||
+        document.querySelector('iframe[src*="captcha"]') ||
+        document.querySelector(".g-recaptcha") ||
+        document.querySelector('[class*="captcha"]') ||
+        document.querySelector('[class*="robot"]') ||
+        document.querySelector('[id*="captcha"]');
+
+      if (hasCaptcha) {
+        console.log("CAPTCHA detected");
+
+        // Attempt to find the container of the CAPTCHA
+        const captchaElement =
+          document.querySelector('iframe[src*="recaptcha"]')?.parentElement ||
+          document.querySelector('iframe[src*="captcha"]')?.parentElement ||
+          document.querySelector(".g-recaptcha") ||
+          document.querySelector('[class*="captcha"]') ||
+          document.querySelector('[id*="captcha"]');
+
+        if (captchaElement) {
+          // Scroll to the CAPTCHA element to make it visible
+          captchaElement.scrollIntoView({
+            behavior: "smooth",
+            block: "center",
+          });
+        }
+
+        // Wait a bit for any animations to complete
+        setTimeout(() => {
+          resolve({
+            hasCaptcha: true,
+            captchaType: determineCaptchaType(),
+          });
+        }, 1000);
+      } else {
+        resolve({
+          hasCaptcha: false,
+        });
+      }
+    });
+  };
+
+  const determineCaptchaType = () => {
+    if (
+      document.querySelector('iframe[src*="recaptcha"]') ||
+      document.querySelector(".g-recaptcha")
+    ) {
+      return "reCAPTCHA";
+    } else if (
+      document.querySelector('iframe[src*="hcaptcha"]') ||
+      document.querySelector(".h-captcha")
+    ) {
+      return "hCaptcha";
+    } else if (
+      document.querySelector('iframe[src*="cloudflare"]') ||
+      document.querySelector("#cf-challenge-container")
+    ) {
+      return "Cloudflare";
+    } else {
+      return "Unknown";
+    }
+  };
+
   console.log(`Processing: ${url}`);
 
-  const tab = await chrome.tabs.create({ url });
+  const tab = await chrome.tabs.create({
+    url,
+    active,
+  });
 
   if (!tab.id) {
     throw new Error("Failed to create tab");
   }
 
+  // Set custom user agent if specified
+  if (customUserAgent) {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (userAgent) => {
+        Object.defineProperty(navigator, "userAgent", {
+          get: function () {
+            return userAgent;
+          },
+        });
+      },
+      args: [customUserAgent],
+    });
+  }
+
+  // Wait for page to load with timeout
   await Promise.race([
     chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => waitForPageLoad(),
     }),
-    new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
+    new Promise((resolve) => setTimeout(() => resolve(null), timeout)),
   ]);
+
+  // Simulate human behavior if enabled
+  if (simulateHuman) {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => simulateHumanBehavior(),
+    });
+  }
+
+  // Check for and handle CAPTCHAs if enabled
+  if (handleCaptcha) {
+    const captchaResult = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => handleCaptchas(),
+    });
+
+    // Define the type of the result
+    interface CaptchaResult {
+      hasCaptcha: boolean;
+      captchaType?: string;
+    }
+
+    // If a captcha was detected, take a screenshot
+    const result = captchaResult[0].result as CaptchaResult;
+
+    if (result.hasCaptcha) {
+      console.log(`CAPTCHA detected: ${result.captchaType}`);
+
+      try {
+        // Capture screenshot
+        const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
+          format: "png",
+        });
+        console.log("Screenshot captured for CAPTCHA");
+
+        // Save the screenshot info to send back
+        return {
+          html: "",
+          captcha: {
+            detected: true,
+            type: result.captchaType,
+            screenshot: screenshot,
+            url: url,
+          },
+        };
+      } catch (error: any) {
+        console.error("Failed to capture CAPTCHA screenshot:", error);
+      }
+    }
+  }
+
+  // Add random delay before extraction if simulating human
+  if (simulateHuman) {
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.floor(Math.random() * 2000) + 1000)
+    );
+  }
 
   const html = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
@@ -37,6 +214,13 @@ const extractHtml = async (url: string) => {
   await chrome.tabs.remove(tab.id);
 
   return html[0].result;
+};
+
+// Add a function to manage cookies
+const manageCookies = async (domain: string) => {
+  const cookies = await chrome.cookies.getAll({ domain });
+  console.log(`Found ${cookies.length} cookies for domain ${domain}`);
+  return cookies;
 };
 
 class WebSocketManager {
@@ -59,16 +243,79 @@ class WebSocketManager {
     };
 
     this.ws.onmessage = async (event) => {
-      const { type, urls, request_id } = JSON.parse(event.data);
+      const data = JSON.parse(event.data);
+      const { type, request_id } = data;
+
       if (type == "extractHtml") {
         console.log("Received extractHtml request");
+
+        const { urls, options = {} } = data;
         let mergedData = [];
+
+        // Extract options with defaults
+        const {
+          simulateHuman = true,
+          customUserAgent = null,
+          timeout = 10000,
+          handleCaptcha = true,
+          manageSiteCookies = true,
+        } = options;
+
         for (const url of urls) {
-          mergedData.push(await extractHtml(url));
+          try {
+            // Get domain for cookie management
+            const domain = new URL(url).hostname;
+
+            // Optionally manage cookies before scraping
+            if (manageSiteCookies) {
+              await manageCookies(domain);
+            }
+
+            // Extract HTML with options
+            const result = await extractHtml(url, {
+              simulateHuman,
+              customUserAgent,
+              timeout,
+              handleCaptcha,
+            });
+
+            // Check if the result contains captcha information
+            if (result && typeof result === "object" && "captcha" in result) {
+              // This is a captcha result
+              mergedData.push({
+                url,
+                captchaDetected: true,
+                captchaType: result.captcha.type,
+                screenshot: result.captcha.screenshot,
+                success: false,
+                html: "",
+              });
+            } else {
+              // Regular HTML result
+              mergedData.push({
+                url,
+                html: result,
+                captchaDetected: false,
+                success: true,
+              });
+            }
+          } catch (error: any) {
+            console.error(`Error extracting HTML from ${url}:`, error);
+            mergedData.push({
+              url,
+              error: error.message,
+              success: false,
+            });
+          }
         }
+
         console.log("Sending extractHtml response");
         this.send(
-          JSON.stringify({ type: "extractHtml", htmls: mergedData, request_id })
+          JSON.stringify({
+            type: "extractHtml",
+            results: mergedData,
+            request_id,
+          })
         );
       }
     };
