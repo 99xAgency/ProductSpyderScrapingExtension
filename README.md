@@ -1,91 +1,117 @@
 # Product Spyder Scraping Extension
 
-A Chrome extension for web scraping with random delays. Built with TypeScript and modular design.
+A Chrome extension for web scraping with advanced bot detection bypass capabilities.
 
 ## Features
 
-- Scrape multiple websites from a list
-- Add random delays between requests to avoid being flagged as a bot
-- Extract detailed product information
-- Comprehensive data extraction from multiple sources
-- TypeScript for type safety and better development experience
+- Human-like browsing simulation (scrolling, delays, etc.)
+- CAPTCHA detection and reporting
+- Cookie management
+- Custom user agent support
+- Configurable timeouts and behavior
+- Screenshots of detected CAPTCHAs
 
-## Project Structure
+## Installation
 
-```
-├── dist/                 # Compiled JavaScript (after build)
-├── src/                  # TypeScript source code
-│   ├── extractors/       # Product data extraction modules
-│   │   ├── utils.ts      # Shared utility functions
-│   │   └── product-extractor.ts # Main extractor implementation
-│   ├── types/            # TypeScript type definitions
-│   │   └── index.ts      # Shared type interfaces
-│   ├── background.ts     # Background script
-│   ├── popup.ts          # Popup UI script
-│   └── content.ts        # Content script
-├── popup.html            # Extension popup UI
-├── manifest.json         # Extension manifest
-├── package.json          # NPM dependencies
-└── tsconfig.json         # TypeScript configuration
-```
-
-## Setup
-
-1. Install dependencies:
-
+1. Clone this repository
+2. Build the extension:
    ```
    npm install
-   ```
-
-2. Build the extension:
-
-   ```
    npm run build
    ```
-
 3. Load the extension in Chrome:
-   - Open Chrome and go to `chrome://extensions/`
+   - Go to `chrome://extensions/`
    - Enable "Developer mode"
-   - Click "Load unpacked" and select the project folder
+   - Click "Load unpacked"
+   - Select the `dist` directory
+
+## Server Setup
+
+1. Install server dependencies:
+   ```
+   pip install flask flask-sock gevent
+   ```
+2. Run the server:
+   ```
+   python server/app.py
+   ```
 
 ## Usage
 
-1. Click the extension icon in your toolbar
-2. Enter the URLs you want to scrape (one per line)
-3. Set minimum and maximum delay between requests (in seconds)
-4. Click "Start Scraping"
+### Basic Usage
 
-The extension will:
+The extension connects to the server via WebSocket and waits for scraping instructions. The server exposes an HTTP endpoint for clients to request HTML extraction.
 
-- Open each URL in a tab
-- Wait for the page to fully load
-- Extract product data using multiple methods
-- Add random delays between requests
-- Save the scraped data to Chrome's local storage
+```python
+import requests
 
-## Development
+# List of URLs to scrape
+urls = ["https://example.com", "https://example.org"]
 
-For development with auto-rebuilding:
+# Send request to the server
+response = requests.post("http://127.0.0.1:9999/fetch", json=urls)
 
-```
-npm run watch
+# Process the response
+html_results = response.json()
 ```
 
-## Data Extraction
+### Advanced Usage with Bot Prevention Bypass
 
-The extension extracts product data from:
+You can customize the scraping behavior to bypass bot prevention:
 
-- LD+JSON structured data
-- Meta tags
-- Shopify analytics
-- And other sources
+```python
+import requests
 
-It collects:
+# List of URLs to scrape
+urls = ["https://example.com", "https://example.org"]
 
-- Product title
-- Price and currency
-- SKU, MPN, UPC (when available)
-- Availability status
-- Product images
-- Seller information (when available)
-- Variations and offers
+# Configure scraping options
+options = {
+    "simulateHuman": True,        # Simulate human browsing behavior
+    "customUserAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "timeout": 15000,             # 15 seconds timeout
+    "handleCaptcha": True,        # Detect and handle CAPTCHAs
+    "manageSiteCookies": True     # Manage site cookies
+}
+
+# Send request with options
+response = requests.post("http://127.0.0.1:9999/fetch",
+                        json={"urls": urls, "options": options})
+
+# Process the enhanced response
+results = response.json()
+
+# Check for CAPTCHAs
+for result in results:
+    if result.get("captchaDetected"):
+        print(f"CAPTCHA detected on {result['url']}")
+        print(f"Type: {result.get('captchaType')}")
+        # The screenshot is saved on the server and can be accessed at:
+        # http://127.0.0.1:9999/captchas/{result['screenshot']}
+```
+
+## Testing
+
+Use the provided test client to verify the functionality:
+
+```
+python server/test_client.py
+```
+
+## CAPTCHA Handling
+
+When a CAPTCHA is detected:
+
+1. The extension takes a screenshot of the CAPTCHA
+2. The server saves the screenshot to the `server/captchas` directory
+3. The response includes the CAPTCHA type and a link to the screenshot
+4. You can view the screenshots at `http://127.0.0.1:9999/captchas/<filename>`
+
+## Extending
+
+To further enhance the bot prevention bypass:
+
+1. Add more human-like interactions in the `simulateHumanBehavior` function
+2. Integrate with external CAPTCHA solving services
+3. Implement proxy rotation
+4. Add more sophisticated browser fingerprinting techniques

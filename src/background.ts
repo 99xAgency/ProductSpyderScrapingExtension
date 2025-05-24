@@ -1,12 +1,6 @@
-const extractHtml = async (url: string, options: any = {}) => {
-  // Default options
-  const {
-    simulateHuman = true,
-    customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-    timeout = 10000,
-    handleCaptcha = true,
-    active = false,
-  } = options;
+const extractHtml = async (url: string) => {
+  let customUserAgent =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36";
 
   const waitForPageLoad = () => {
     return new Promise((resolve) => {
@@ -118,7 +112,6 @@ const extractHtml = async (url: string, options: any = {}) => {
 
   const tab = await chrome.tabs.create({
     url,
-    active,
   });
 
   if (!tab.id) {
@@ -146,65 +139,35 @@ const extractHtml = async (url: string, options: any = {}) => {
       target: { tabId: tab.id },
       func: () => waitForPageLoad(),
     }),
-    new Promise((resolve) => setTimeout(() => resolve(null), timeout)),
+    new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
   ]);
 
-  // Simulate human behavior if enabled
-  if (simulateHuman) {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => simulateHumanBehavior(),
-    });
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => simulateHumanBehavior(),
+  });
+
+  const captchaResult = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => handleCaptchas(),
+  });
+
+  interface CaptchaResult {
+    hasCaptcha: boolean;
+    captchaType?: string;
   }
 
-  // Check for and handle CAPTCHAs if enabled
-  if (handleCaptcha) {
-    const captchaResult = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => handleCaptchas(),
-    });
+  // If a captcha was detected, take a screenshot
+  const result = captchaResult[0].result as CaptchaResult;
 
-    // Define the type of the result
-    interface CaptchaResult {
-      hasCaptcha: boolean;
-      captchaType?: string;
-    }
-
-    // If a captcha was detected, take a screenshot
-    const result = captchaResult[0].result as CaptchaResult;
-
-    if (result.hasCaptcha) {
-      console.log(`CAPTCHA detected: ${result.captchaType}`);
-
-      try {
-        // Capture screenshot
-        const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
-          format: "png",
-        });
-        console.log("Screenshot captured for CAPTCHA");
-
-        // Save the screenshot info to send back
-        return {
-          html: "",
-          captcha: {
-            detected: true,
-            type: result.captchaType,
-            screenshot: screenshot,
-            url: url,
-          },
-        };
-      } catch (error: any) {
-        console.error("Failed to capture CAPTCHA screenshot:", error);
-      }
-    }
+  if (result.hasCaptcha) {
+    console.log(`CAPTCHA detected: ${result.captchaType}`);
+    return "";
   }
 
-  // Add random delay before extraction if simulating human
-  if (simulateHuman) {
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.floor(Math.random() * 2000) + 1000)
-    );
-  }
+  await new Promise((resolve) =>
+    setTimeout(resolve, Math.floor(Math.random() * 2000) + 1000)
+  );
 
   const html = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
@@ -214,13 +177,6 @@ const extractHtml = async (url: string, options: any = {}) => {
   await chrome.tabs.remove(tab.id);
 
   return html[0].result;
-};
-
-// Add a function to manage cookies
-const manageCookies = async (domain: string) => {
-  const cookies = await chrome.cookies.getAll({ domain });
-  console.log(`Found ${cookies.length} cookies for domain ${domain}`);
-  return cookies;
 };
 
 class WebSocketManager {
@@ -249,63 +205,17 @@ class WebSocketManager {
       if (type == "extractHtml") {
         console.log("Received extractHtml request");
 
-        const { urls, options = {} } = data;
+        const { urls } = data;
         let mergedData = [];
 
-        // Extract options with defaults
-        const {
-          simulateHuman = true,
-          customUserAgent = null,
-          timeout = 10000,
-          handleCaptcha = true,
-          manageSiteCookies = true,
-        } = options;
-
+        // Extract options with de
         for (const url of urls) {
           try {
-            // Get domain for cookie management
-            const domain = new URL(url).hostname;
-
-            // Optionally manage cookies before scraping
-            if (manageSiteCookies) {
-              await manageCookies(domain);
-            }
-
-            // Extract HTML with options
-            const result = await extractHtml(url, {
-              simulateHuman,
-              customUserAgent,
-              timeout,
-              handleCaptcha,
-            });
-
-            // Check if the result contains captcha information
-            if (result && typeof result === "object" && "captcha" in result) {
-              // This is a captcha result
-              mergedData.push({
-                url,
-                captchaDetected: true,
-                captchaType: result.captcha.type,
-                screenshot: result.captcha.screenshot,
-                success: false,
-                html: "",
-              });
-            } else {
-              // Regular HTML result
-              mergedData.push({
-                url,
-                html: result,
-                captchaDetected: false,
-                success: true,
-              });
-            }
+            const result = await extractHtml(url);
+            mergedData.push(result);
           } catch (error: any) {
             console.error(`Error extracting HTML from ${url}:`, error);
-            mergedData.push({
-              url,
-              error: error.message,
-              success: false,
-            });
+            mergedData.push("");
           }
         }
 
