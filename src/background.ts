@@ -29,6 +29,8 @@ const extractHtml = async (url: string) => {
     new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
   ]);
 
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+
   const html = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
     func: () => document.documentElement.outerHTML,
