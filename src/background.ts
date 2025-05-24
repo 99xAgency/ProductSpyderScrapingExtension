@@ -13,6 +13,40 @@ const extractHtml = async (url: string) => {
     });
   };
 
+  const simulateHumanScrolling = () => {
+    return new Promise((resolve) => {
+      const scrollHeight = document.documentElement.scrollHeight;
+      const viewportHeight = window.innerHeight;
+      let currentScroll = 0;
+
+      const scroll = () => {
+        if (currentScroll >= scrollHeight - viewportHeight) {
+          resolve(null);
+          return;
+        }
+
+        // Random scroll amount between 100 and 400 pixels
+        const scrollAmount = Math.floor(Math.random() * 300) + 100;
+        currentScroll += scrollAmount;
+
+        // Ensure we don't scroll past the bottom
+        currentScroll = Math.min(currentScroll, scrollHeight - viewportHeight);
+
+        window.scrollTo({
+          top: currentScroll,
+          behavior: "smooth",
+        });
+
+        // Random pause between 500ms and 2000ms
+        const pause = Math.floor(Math.random() * 1500) + 500;
+        setTimeout(scroll, pause);
+      };
+
+      // Start scrolling
+      scroll();
+    });
+  };
+
   console.log(`Processing: ${url}`);
 
   const tab = await chrome.tabs.create({ url });
@@ -26,8 +60,14 @@ const extractHtml = async (url: string) => {
       target: { tabId: tab.id },
       func: () => waitForPageLoad(),
     }),
-    new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
+    new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
   ]);
+
+  // Add human-like scrolling behavior
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => simulateHumanScrolling(),
+  });
 
   const html = await chrome.scripting.executeScript({
     target: { tabId: tab.id },
