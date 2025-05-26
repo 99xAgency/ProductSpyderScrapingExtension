@@ -41,7 +41,7 @@ const extractHtml = async (url: string) => {
       target: { tabId: tab.id },
       func: waitForPageLoad,
     }),
-    new Promise((resolve) => setTimeout(() => resolve(null), 6000)),
+    new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
   ]);
 
   await new Promise((resolve) => setTimeout(resolve, 3000));
