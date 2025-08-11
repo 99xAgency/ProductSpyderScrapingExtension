@@ -1,3 +1,108 @@
+const captureFullPageScreenshot = async (url: string) => {
+  console.log(`Capturing screenshot: ${url}`);
+
+  const tab = await chrome.tabs.create({ url });
+
+  if (!tab.id) {
+    throw new Error("Failed to create tab");
+  }
+
+  const waitForPageLoad = () => {
+    return new Promise((resolve) => {
+      if (document.readyState === "complete") {
+        resolve(null);
+      } else {
+        document.addEventListener("readystatechange", () => {
+          if (document.readyState === "complete") {
+            resolve(null);
+          }
+        });
+      }
+    });
+  };
+
+  // Wait for page to load
+  await Promise.race([
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: waitForPageLoad,
+    }),
+    new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+  ]);
+
+  // Additional wait for dynamic content
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+
+  // Get page dimensions
+  const dimensions = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => {
+      const body = document.body;
+      const html = document.documentElement;
+      return {
+        width: Math.max(
+          body.scrollWidth,
+          body.offsetWidth,
+          html.clientWidth,
+          html.scrollWidth,
+          html.offsetWidth
+        ),
+        height: Math.max(
+          body.scrollHeight,
+          body.offsetHeight,
+          html.clientHeight,
+          html.scrollHeight,
+          html.offsetHeight
+        ),
+        viewportHeight: window.innerHeight,
+        viewportWidth: window.innerWidth
+      };
+    },
+  });
+
+  const { width, height, viewportHeight } = dimensions[0].result as any;
+  const screenshots: string[] = [];
+  let currentPosition = 0;
+
+  // Capture screenshots in segments
+  while (currentPosition < height) {
+    // Scroll to position
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: (position: number) => {
+        window.scrollTo(0, position);
+      },
+      args: [currentPosition]
+    });
+
+    // Wait for scroll to settle
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Capture visible area
+    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId!, {
+      format: 'png'
+    });
+    
+    screenshots.push(dataUrl);
+    currentPosition += viewportHeight;
+  }
+
+  // Get current URL (in case of redirects)
+  const currentUrl = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => window.location.href,
+  });
+
+  await chrome.tabs.remove(tab.id);
+
+  return {
+    screenshots,
+    url: currentUrl[0].result,
+    dimensions: { width, height },
+    segmentCount: screenshots.length
+  };
+};
+
 const extractHtml = async (url: string) => {
   const waitForPageLoad = () => {
     return new Promise((resolve) => {
@@ -103,6 +208,30 @@ class WebSocketManager {
           JSON.stringify({
             type: "extractHtml",
             results: mergedData,
+            request_id,
+          })
+        );
+      } else if (type == "captureScreenshot") {
+        console.log("Received screenshot request");
+        let screenshotData = [];
+        for (const url of urls) {
+          try {
+            const result = await captureFullPageScreenshot(url);
+            screenshotData.push(result);
+          } catch (error) {
+            console.error(`Failed to capture screenshot for ${url}:`, error);
+            screenshotData.push({
+              url,
+              error: (error as Error).message,
+              screenshots: []
+            });
+          }
+        }
+        console.log("Sending screenshot response");
+        this.send(
+          JSON.stringify({
+            type: "captureScreenshot",
+            results: screenshotData,
             request_id,
           })
         );
