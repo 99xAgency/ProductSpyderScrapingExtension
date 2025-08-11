@@ -3,7 +3,7 @@
   "name": "Product Spyder Scraping Extension",
   "version": "1.0",
   "description": "A web scraping extension with random delays",
-  "permissions": ["activeTab", "storage", "scripting", "cookies", "tabs"],
+  "permissions": ["activeTab", "storage", "scripting", "cookies", "tabs", "debugger"],
   "host_permissions": ["<all_urls>"],
   "action": {
     "default_popup": "popup.html"
