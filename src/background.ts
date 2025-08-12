@@ -108,7 +108,7 @@ const captureScreenshot = async (url: string) => {
 
   await chrome.tabs.remove(tab.id);
 
-  return screenshot;
+  return screenshot.split(",")[1];
 };
 
 class WebSocketManager {
@@ -192,7 +192,7 @@ class WebSocketManager {
 
 new WebSocketManager("ws://127.0.0.1:9999/ws");
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _, sendResponse) => {
   if (message.action === "ping") {
     sendResponse("pong");
   }

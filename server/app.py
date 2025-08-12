@@ -137,11 +137,11 @@ def screenshot():
         file_paths = []
 
         # save base64 screenshots to file
-        for i, screenshot in enumerate(parsed_data["results"]):
+        for screenshot in parsed_data["results"]:
             file_name = f"screenshot_{str(uuid.uuid4()).split('-')[0]}.png"
             file_path = f"screenshots/{file_name}"
             with open(file_path, "wb") as f:
-                f.write(base64.b64decode(screenshot.split(",")[1]))
+                f.write(base64.b64decode(screenshot))
             file_paths.append(file_path)
 
         return jsonify(file_paths)
