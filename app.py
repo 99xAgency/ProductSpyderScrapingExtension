@@ -53,7 +53,7 @@ async def wait_for_page_load(tab: zd.Tab) -> bool:
 app = FastAPI(lifespan=lifespan)
 
 
-@app.post("/extract")
+@app.post("/fetch")
 async def extract(request: URLRequest):
     url = request.url
     tab = None
