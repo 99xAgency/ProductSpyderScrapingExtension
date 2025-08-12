@@ -67,9 +67,11 @@ async def extract(request: URLRequest):
 
         await asyncio.sleep(1)
 
+        url = await tab.evaluate("window.location.href")
+        status_code = 200
         source_code = await tab.evaluate("document.documentElement.outerHTML")
 
-        return source_code
+        return {"status_code": status_code, "url": url, "html": source_code}
 
     except Exception:
         return ""
