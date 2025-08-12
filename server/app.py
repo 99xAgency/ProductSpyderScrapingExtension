@@ -1,28 +1,19 @@
 import base64
-import io
 import json
-import os
 import queue
 import threading
 import uuid
-from datetime import datetime
 
-import requests
 from flask import Flask, jsonify, request
 from flask_sock import Sock
 from gevent import monkey
 from gevent.pywsgi import WSGIServer
-from PIL import Image
 
 monkey.patch_all()
 
 app = Flask(__name__)
 sock = Sock(app)
 
-# Create screenshots directory if it doesn't exist
-SCREENSHOTS_DIR = "screenshots"
-if not os.path.exists(SCREENSHOTS_DIR):
-    os.makedirs(SCREENSHOTS_DIR)
 
 client_list = []
 response_queues = {}
@@ -104,14 +95,10 @@ def extract_data():
 
 
 @app.route("/screenshot", methods=["POST"])
-def capture_screenshot():
-    print("Capturing screenshot")
+def screenshot():
+    print("Taking screenshot")
 
-    data = request.json
-    urls = data.get("urls", [])
-
-    if not urls:
-        return jsonify({"error": "No URLs provided"}), 400
+    urls = request.json
 
     # Create a unique request ID
     request_id = str(uuid.uuid4())
@@ -122,7 +109,7 @@ def capture_screenshot():
 
     successfull_send = 0
     for client in client_list[:]:  # Create a copy of the list to safely iterate
-        print("Sending screenshot request to client")
+        print("Sending to client")
         try:
             client.send(json.dumps({"type": "captureScreenshot", "urls": urls, "request_id": request_id}))
             successfull_send += 1
@@ -131,62 +118,38 @@ def capture_screenshot():
             if client in client_list:
                 client_list.remove(client)
 
-    print(f"Successfully sent screenshot request to {successfull_send} clients")
+    print(f"Successfully sent to {successfull_send} clients")
 
     if successfull_send == 0:
-        # Clean up the queue if no clients are available
         with response_lock:
             if request_id in response_queues:
                 del response_queues[request_id]
         return jsonify({"error": "No client available"}), 500
 
-    print(f"Waiting for screenshot data for request {request_id}")
+    print(f"Waiting for data for request {request_id}")
 
     try:
-        # Wait for response with timeout
         with response_lock:
             response_queue = response_queues[request_id]
 
         parsed_data = response_queue.get(timeout=300)
 
-        # Process screenshots and save them to files
-        processed_results = []
-        for result in parsed_data["results"]:
-            if "screenshot" in result and result["screenshot"]:
-                # Generate filename with timestamp and URL hash
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                url_hash = str(hash(result["url"]))[-8:]  # Last 8 chars of hash
-                filename = f"screenshot_{timestamp}_{url_hash}.png"
-                filepath = os.path.join(SCREENSHOTS_DIR, filename)
+        file_paths = []
 
-                # Remove the data URL prefix if present
-                screenshot_data = result["screenshot"]
-                if screenshot_data.startswith("data:image/png;base64,"):
-                    screenshot_data = screenshot_data.split(",")[1]
+        # save base64 screenshots to file
+        for i, screenshot in enumerate(parsed_data["results"]):
+            file_name = f"screenshot_{str(uuid.uuid4()).split('-')[0]}.png"
+            file_path = f"screenshots/{file_name}"
+            with open(file_path, "wb") as f:
+                f.write(base64.b64decode(screenshot.split(",")[1]))
+            file_paths.append(file_path)
 
-                try:
-                    # Decode base64 and save as image
-                    image_data = base64.b64decode(screenshot_data)
-                    image = Image.open(io.BytesIO(image_data))
-                    image.save(filepath)
-
-                    processed_results.append(
-                        {"filename": filename, "dimensions": result.get("dimensions", {}), "url": result["url"]}
-                    )
-                    print(f"Saved screenshot: {filename}")
-                except Exception as e:
-                    print(f"Error saving screenshot: {e}")
-                    processed_results.append({"error": f"Failed to save screenshot: {str(e)}", "url": result["url"]})
-            else:
-                processed_results.append({"error": "No screenshot data received", "url": result["url"]})
-
-        return jsonify(processed_results)
+        return jsonify(file_paths)
 
     except queue.Empty:
-        return jsonify({"error": "Screenshot request timed out"}), 504
+        return jsonify({"error": "Request timed out"}), 504
 
     finally:
-        # Clean up the queue after processing
         with response_lock:
             if request_id in response_queues:
                 del response_queues[request_id]

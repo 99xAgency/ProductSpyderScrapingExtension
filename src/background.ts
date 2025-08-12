@@ -86,29 +86,7 @@ const captureScreenshot = async (url: string) => {
     });
   };
 
-  const getPageDimensions = () => {
-    return {
-      width: Math.max(
-        document.documentElement.scrollWidth,
-        document.body.scrollWidth,
-        document.documentElement.offsetWidth,
-        document.body.offsetWidth,
-        document.documentElement.clientWidth
-      ),
-      height: Math.max(
-        document.documentElement.scrollHeight,
-        document.body.scrollHeight,
-        document.documentElement.offsetHeight,
-        document.body.offsetHeight,
-        document.documentElement.clientHeight
-      ),
-    };
-  };
-
-  console.log(`Capturing screenshot for: ${url}`);
-
   const tab = await chrome.tabs.create({ url });
-
   if (!tab.id) {
     throw new Error("Failed to create tab");
   }
@@ -123,45 +101,14 @@ const captureScreenshot = async (url: string) => {
 
   await new Promise((resolve) => setTimeout(resolve, 3000));
 
-  // Get page dimensions
-  const dimensions = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: getPageDimensions,
-  });
-
-  const { width, height } = dimensions[0].result || {
-    width: 1920,
-    height: 1080,
-  };
-
-  // Capture the screenshot
   const screenshot = await chrome.tabs.captureVisibleTab(tab.id, {
     format: "png",
     quality: 100,
   });
 
-  // If the page is larger than the viewport, we need to capture it in parts
-  let fullScreenshot = screenshot;
-
-  if (height > 800) {
-    // If page height is greater than typical viewport
-    // For now, we'll capture the visible area
-    // In a more advanced implementation, you could scroll and stitch multiple screenshots
-    console.log("Page is taller than viewport, capturing visible area only");
-  }
-
-  const currentUrl = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => window.location.href,
-  });
-
   await chrome.tabs.remove(tab.id);
 
-  return {
-    screenshot: fullScreenshot,
-    dimensions: { width, height },
-    url: currentUrl[0].result,
-  };
+  return screenshot;
 };
 
 class WebSocketManager {
@@ -199,13 +146,13 @@ class WebSocketManager {
             request_id,
           })
         );
-      } else if (type == "captureScreenshot") {
-        console.log("Received captureScreenshot request");
+      }
+
+      if (type == "captureScreenshot") {
         let mergedData = [];
         for (const url of urls) {
           mergedData.push(await captureScreenshot(url));
         }
-        console.log("Sending captureScreenshot response");
         this.send(
           JSON.stringify({
             type: "captureScreenshot",
