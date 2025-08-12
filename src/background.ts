@@ -80,37 +80,62 @@ const captureFullPageScreenshot = async (url: string) => {
     // Wait for the viewport change to take effect
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // Force a layout update
-    await chrome.debugger.sendCommand(
-      { tabId: tab.id },
-      "Page.setDocumentContent",
-      {
-        frameId: (await chrome.debugger.sendCommand({ tabId: tab.id }, "Page.getFrameTree") as any).frameTree.frame.id,
-        html: await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => document.documentElement.outerHTML,
-        }).then(r => r[0].result)
+    // Scroll to ensure all lazy-loaded content is visible
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        window.scrollTo(0, document.body.scrollHeight);
+        return new Promise(resolve => {
+          setTimeout(() => {
+            window.scrollTo(0, 0);
+            setTimeout(resolve, 500);
+          }, 500);
+        });
       }
-    ).catch(() => {}); // Ignore if this fails
+    });
 
-    // Capture the full page screenshot
-    const screenshot = await chrome.debugger.sendCommand(
-      { tabId: tab.id },
-      "Page.captureScreenshot",
-      {
-        format: "png",
-        quality: 100,
-        captureBeyondViewport: true,
-        fromSurface: true,
-        clip: {
-          x: 0,
-          y: 0,
-          width: viewportWidth,
-          height: viewportHeight,
-          scale: 1
+    // Additional wait for any animations to complete
+    await new Promise(resolve => setTimeout(resolve, 1000));
+
+    // Capture the full page screenshot with fallback options
+    let screenshot;
+    try {
+      // First attempt with captureBeyondViewport
+      screenshot = await chrome.debugger.sendCommand(
+        { tabId: tab.id },
+        "Page.captureScreenshot",
+        {
+          format: "png",
+          quality: 90,
+          captureBeyondViewport: true,
+          fromSurface: false
         }
+      ) as any;
+    } catch (firstError) {
+      console.warn("First screenshot attempt failed, trying with clip:", firstError);
+      
+      // Fallback: try with explicit clip and no captureBeyondViewport
+      try {
+        screenshot = await chrome.debugger.sendCommand(
+          { tabId: tab.id },
+          "Page.captureScreenshot",
+          {
+            format: "png",
+            quality: 90,
+            clip: {
+              x: 0,
+              y: 0,
+              width: Math.min(viewportWidth, 16384), // Chrome has max dimensions
+              height: Math.min(viewportHeight, 16384),
+              scale: 1
+            }
+          }
+        ) as any;
+      } catch (secondError) {
+        console.error("Both screenshot attempts failed:", secondError);
+        throw secondError;
       }
-    ) as any;
+    }
 
     // Get current URL (in case of redirects)
     const currentUrl = await chrome.scripting.executeScript({
@@ -145,7 +170,12 @@ const captureFullPageScreenshot = async (url: string) => {
       await chrome.tabs.remove(tab.id);
     } catch {}
 
-    throw new Error(`Failed to capture screenshot: ${(error as Error).message}`);
+    // Provide more detailed error information
+    const errorMessage = error && typeof error === 'object' && 'message' in error 
+      ? (error as any).message 
+      : JSON.stringify(error);
+    
+    throw new Error(`Failed to capture screenshot: ${errorMessage}`);
   }
 };
 
