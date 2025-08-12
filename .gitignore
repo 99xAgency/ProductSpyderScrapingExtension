@@ -1,11 +1,1 @@
-# Python-generated files
-__pycache__/
-server/_pycache_/
-*.py[oc]
-build/
-dist/
-wheels/
-*.egg-info
-.venv
-dist
-node_modules
+data
