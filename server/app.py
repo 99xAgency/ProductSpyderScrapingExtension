@@ -1,13 +1,14 @@
 import base64
 import io
 import json
+import os
 import queue
 import threading
 import uuid
 from datetime import datetime
-from pathlib import Path
 
-from flask import Flask, jsonify, request, send_file
+import requests
+from flask import Flask, jsonify, request
 from flask_sock import Sock
 from gevent import monkey
 from gevent.pywsgi import WSGIServer
@@ -18,6 +19,10 @@ monkey.patch_all()
 app = Flask(__name__)
 sock = Sock(app)
 
+# Create screenshots directory if it doesn't exist
+SCREENSHOTS_DIR = "screenshots"
+if not os.path.exists(SCREENSHOTS_DIR):
+    os.makedirs(SCREENSHOTS_DIR)
 
 client_list = []
 response_queues = {}
@@ -42,158 +47,6 @@ def echo(sock):
             if sock in client_list:
                 client_list.remove(sock)
             break
-
-
-def process_screenshot(result):
-    """Process screenshot segments and stitch them together if needed."""
-    if not result.get("screenshots"):
-        return None
-    
-    screenshots = result["screenshots"]
-    segments_info = result.get("segments", [])
-    dimensions = result.get("dimensions", {})
-    
-    # If we only have one screenshot, return it directly
-    if len(screenshots) == 1:
-        img_data = screenshots[0].split(",")[1]
-        img_bytes = base64.b64decode(img_data)
-        return Image.open(io.BytesIO(img_bytes))
-    
-    # Multiple segments - need to stitch them together
-    full_width = dimensions.get("width", 0)
-    full_height = dimensions.get("height", 0)
-    
-    if not full_width or not full_height:
-        # Fallback: return the first segment if dimensions are missing
-        img_data = screenshots[0].split(",")[1]
-        img_bytes = base64.b64decode(img_data)
-        return Image.open(io.BytesIO(img_bytes))
-    
-    # Create a new image with the full dimensions
-    stitched_image = Image.new("RGB", (full_width, full_height), color="white")
-    
-    # Paste each segment into the correct position
-    for i, screenshot_data in enumerate(screenshots):
-        # Get segment info
-        if i < len(segments_info):
-            segment = segments_info[i]
-            x = segment.get("x", 0)
-            y = segment.get("y", 0)
-        else:
-            # Fallback if segment info is missing
-            x = 0
-            y = 0
-        
-        # Decode and paste the segment
-        img_data = screenshot_data.split(",")[1]
-        img_bytes = base64.b64decode(img_data)
-        segment_img = Image.open(io.BytesIO(img_bytes))
-        
-        stitched_image.paste(segment_img, (x, y))
-    
-    return stitched_image
-
-
-@app.route("/screenshot", methods=["POST"])
-def capture_screenshot():
-    """Capture full page screenshots of the provided URLs."""
-    print("Capturing screenshots")
-
-    urls = request.json
-
-    if not urls:
-        return jsonify({"error": "No URLs provided"}), 400
-
-    # Create screenshots directory if it doesn't exist
-    screenshots_dir = Path("screenshots")
-    screenshots_dir.mkdir(exist_ok=True)
-
-    # Create a unique request ID
-    request_id = str(uuid.uuid4())
-
-    # Create a queue for this specific request
-    with response_lock:
-        response_queues[request_id] = queue.Queue()
-
-    successful_send = 0
-    for client in client_list[:]:
-        print("Sending screenshot request to client")
-        try:
-            client.send(json.dumps({"type": "captureScreenshot", "urls": urls, "request_id": request_id}))
-            successful_send += 1
-        except Exception:
-            print("Removing client")
-            if client in client_list:
-                client_list.remove(client)
-
-    print(f"Successfully sent to {successful_send} clients")
-
-    if successful_send == 0:
-        with response_lock:
-            if request_id in response_queues:
-                del response_queues[request_id]
-        return jsonify({"error": "No client available"}), 500
-
-    print(f"Waiting for screenshot data for request {request_id}")
-
-    try:
-        # Wait for response with timeout
-        with response_lock:
-            response_queue = response_queues[request_id]
-
-        parsed_data = response_queue.get(timeout=300)
-
-        # Process the screenshot results
-        results = []
-        for result in parsed_data["results"]:
-            if "error" in result:
-                results.append({"url": result["url"], "error": result["error"]})
-            else:
-                # Process the screenshot (handles both single and multi-segment)
-                screenshot_image = process_screenshot(result)
-
-                if screenshot_image:
-                    # Generate filename
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = f"screenshot_{timestamp}_{uuid.uuid4().hex[:8]}.png"
-                    filepath = screenshots_dir / filename
-
-                    # Save the image
-                    screenshot_image.save(filepath, "PNG")
-
-                    results.append(
-                        {
-                            "url": result["url"],
-                            "filename": filename,
-                            "path": str(filepath),
-                            "dimensions": result["dimensions"],
-                        }
-                    )
-                else:
-                    results.append({"url": result["url"], "error": "Failed to process screenshot"})
-
-        return jsonify({"screenshots": results})
-
-    except queue.Empty:
-        return jsonify({"error": "Request timed out"}), 504
-
-    finally:
-        # Clean up the queue after processing
-        with response_lock:
-            if request_id in response_queues:
-                del response_queues[request_id]
-
-
-@app.route("/screenshots/<filename>", methods=["GET"])
-def serve_screenshot(filename):
-    """Serve a screenshot file."""
-    screenshots_dir = Path("screenshots")
-    filepath = screenshots_dir / filename
-
-    if not filepath.exists():
-        return jsonify({"error": "Screenshot not found"}), 404
-
-    return send_file(filepath, mimetype="image/png")
 
 
 @app.route("/fetch", methods=["POST"])
@@ -242,6 +95,95 @@ def extract_data():
 
     except queue.Empty:
         return jsonify({"error": "Request timed out"}), 504
+
+    finally:
+        # Clean up the queue after processing
+        with response_lock:
+            if request_id in response_queues:
+                del response_queues[request_id]
+
+
+@app.route("/screenshot", methods=["POST"])
+def capture_screenshot():
+    print("Capturing screenshot")
+
+    data = request.json
+    urls = data.get("urls", [])
+
+    if not urls:
+        return jsonify({"error": "No URLs provided"}), 400
+
+    # Create a unique request ID
+    request_id = str(uuid.uuid4())
+
+    # Create a queue for this specific request
+    with response_lock:
+        response_queues[request_id] = queue.Queue()
+
+    successfull_send = 0
+    for client in client_list[:]:  # Create a copy of the list to safely iterate
+        print("Sending screenshot request to client")
+        try:
+            client.send(json.dumps({"type": "captureScreenshot", "urls": urls, "request_id": request_id}))
+            successfull_send += 1
+        except Exception:
+            print("Removing client")
+            if client in client_list:
+                client_list.remove(client)
+
+    print(f"Successfully sent screenshot request to {successfull_send} clients")
+
+    if successfull_send == 0:
+        # Clean up the queue if no clients are available
+        with response_lock:
+            if request_id in response_queues:
+                del response_queues[request_id]
+        return jsonify({"error": "No client available"}), 500
+
+    print(f"Waiting for screenshot data for request {request_id}")
+
+    try:
+        # Wait for response with timeout
+        with response_lock:
+            response_queue = response_queues[request_id]
+
+        parsed_data = response_queue.get(timeout=300)
+
+        # Process screenshots and save them to files
+        processed_results = []
+        for result in parsed_data["results"]:
+            if "screenshot" in result and result["screenshot"]:
+                # Generate filename with timestamp and URL hash
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                url_hash = str(hash(result["url"]))[-8:]  # Last 8 chars of hash
+                filename = f"screenshot_{timestamp}_{url_hash}.png"
+                filepath = os.path.join(SCREENSHOTS_DIR, filename)
+
+                # Remove the data URL prefix if present
+                screenshot_data = result["screenshot"]
+                if screenshot_data.startswith("data:image/png;base64,"):
+                    screenshot_data = screenshot_data.split(",")[1]
+
+                try:
+                    # Decode base64 and save as image
+                    image_data = base64.b64decode(screenshot_data)
+                    image = Image.open(io.BytesIO(image_data))
+                    image.save(filepath)
+
+                    processed_results.append(
+                        {"filename": filename, "dimensions": result.get("dimensions", {}), "url": result["url"]}
+                    )
+                    print(f"Saved screenshot: {filename}")
+                except Exception as e:
+                    print(f"Error saving screenshot: {e}")
+                    processed_results.append({"error": f"Failed to save screenshot: {str(e)}", "url": result["url"]})
+            else:
+                processed_results.append({"error": "No screenshot data received", "url": result["url"]})
+
+        return jsonify(processed_results)
+
+    except queue.Empty:
+        return jsonify({"error": "Screenshot request timed out"}), 504
 
     finally:
         # Clean up the queue after processing

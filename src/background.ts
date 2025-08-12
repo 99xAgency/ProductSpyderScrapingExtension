@@ -1,203 +1,3 @@
-const captureFullPageScreenshot = async (url: string) => {
-  console.log(`Capturing screenshot: ${url}`);
-
-  const tab = await chrome.tabs.create({ url, active: false });
-
-  if (!tab.id) {
-    throw new Error("Failed to create tab");
-  }
-
-  const waitForPageLoad = () => {
-    return new Promise((resolve) => {
-      if (document.readyState === "complete") {
-        resolve(null);
-      } else {
-        const handler = () => {
-          if (document.readyState === "complete") {
-            document.removeEventListener("readystatechange", handler);
-            resolve(null);
-          }
-        };
-        document.addEventListener("readystatechange", handler);
-      }
-    });
-  };
-
-  try {
-    // Wait for page to load
-    await Promise.race([
-      chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: waitForPageLoad,
-      }),
-      new Promise((resolve) => setTimeout(() => resolve(null), 15000)),
-    ]);
-
-    // Additional wait for dynamic content to render
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-
-    // Attach debugger to the tab
-    await chrome.debugger.attach({ tabId: tab.id }, "1.3");
-
-    // Enable necessary domains
-    await chrome.debugger.sendCommand({ tabId: tab.id }, "Page.enable");
-    await chrome.debugger.sendCommand({ tabId: tab.id }, "Runtime.enable");
-    await chrome.debugger.sendCommand({ tabId: tab.id }, "DOM.enable");
-
-    // Get page metrics for full page dimensions
-    const metrics = await chrome.debugger.sendCommand(
-      { tabId: tab.id },
-      "Page.getLayoutMetrics"
-    ) as any;
-
-    const { width: contentWidth, height: contentHeight } = metrics.contentSize;
-    const fullWidth = Math.ceil(contentWidth);
-    const fullHeight = Math.ceil(contentHeight);
-
-    console.log(`Page dimensions: ${fullWidth}x${fullHeight}`);
-
-    // Chrome has limitations on viewport size, so we'll capture in segments if needed
-    const maxViewportSize = 8192; // Safe maximum for Chrome
-    const segmentHeight = Math.min(fullHeight, maxViewportSize);
-    const segmentWidth = Math.min(fullWidth, maxViewportSize);
-    
-    // Calculate number of segments needed
-    const verticalSegments = Math.ceil(fullHeight / segmentHeight);
-    const horizontalSegments = Math.ceil(fullWidth / segmentWidth);
-    
-    console.log(`Will capture in ${verticalSegments} vertical x ${horizontalSegments} horizontal segments`);
-
-    const screenshots = [];
-    
-    // Capture each segment
-    for (let vSeg = 0; vSeg < verticalSegments; vSeg++) {
-      for (let hSeg = 0; hSeg < horizontalSegments; hSeg++) {
-        const x = hSeg * segmentWidth;
-        const y = vSeg * segmentHeight;
-        const captureWidth = Math.min(segmentWidth, fullWidth - x);
-        const captureHeight = Math.min(segmentHeight, fullHeight - y);
-        
-        console.log(`Capturing segment ${vSeg * horizontalSegments + hSeg + 1}/${verticalSegments * horizontalSegments} at (${x}, ${y}) with size ${captureWidth}x${captureHeight}`);
-        
-        // Set viewport for this segment
-        await chrome.debugger.sendCommand(
-          { tabId: tab.id },
-          "Emulation.setDeviceMetricsOverride",
-          {
-            width: captureWidth,
-            height: captureHeight,
-            deviceScaleFactor: 1,
-            mobile: false,
-            screenWidth: captureWidth,
-            screenHeight: captureHeight,
-            positionX: 0,
-            positionY: 0,
-            dontSetVisibleSize: false,
-            screenOrientation: {
-              type: "portraitPrimary",
-              angle: 0
-            }
-          }
-        );
-        
-        // Scroll to the segment position
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: (scrollX: number, scrollY: number) => {
-            window.scrollTo(scrollX, scrollY);
-          },
-          args: [x, y]
-        });
-        
-        // Wait for render
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Capture this segment
-        const screenshot = await chrome.debugger.sendCommand(
-          { tabId: tab.id },
-          "Page.captureScreenshot",
-          {
-            format: "png",
-            quality: 90,
-            clip: {
-              x: 0,
-              y: 0,
-              width: captureWidth,
-              height: captureHeight,
-              scale: 1
-            }
-          }
-        ) as any;
-        
-        screenshots.push({
-          data: screenshot.data,
-          x,
-          y,
-          width: captureWidth,
-          height: captureHeight
-        });
-      }
-    }
-
-    // Get current URL (in case of redirects)
-    const currentUrl = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => window.location.href,
-    });
-
-    // Detach debugger
-    await chrome.debugger.detach({ tabId: tab.id });
-
-    // Close the tab
-    await chrome.tabs.remove(tab.id);
-
-    // If we only have one segment, return it directly
-    if (screenshots.length === 1) {
-      const dataUrl = `data:image/png;base64,${screenshots[0].data}`;
-      return {
-        screenshots: [dataUrl],
-        url: currentUrl[0].result,
-        dimensions: { width: fullWidth, height: fullHeight },
-        segmentCount: 1
-      };
-    }
-
-    // Otherwise, return all segments for server-side stitching
-    const dataUrls = screenshots.map(s => `data:image/png;base64,${s.data}`);
-    
-    return {
-      screenshots: dataUrls,
-      url: currentUrl[0].result,
-      dimensions: { width: fullWidth, height: fullHeight },
-      segmentCount: screenshots.length,
-      segments: screenshots.map(s => ({
-        x: s.x,
-        y: s.y,
-        width: s.width,
-        height: s.height
-      }))
-    };
-  } catch (error) {
-    console.error("Screenshot capture failed:", error);
-    
-    // Ensure cleanup
-    try {
-      await chrome.debugger.detach({ tabId: tab.id });
-    } catch {}
-    
-    try {
-      await chrome.tabs.remove(tab.id);
-    } catch {}
-
-    // Provide more detailed error information
-    const errorMessage = error && typeof error === 'object' && 'message' in error 
-      ? (error as any).message 
-      : JSON.stringify(error);
-    
-    throw new Error(`Failed to capture screenshot: ${errorMessage}`);
-  }
-};
-
 const extractHtml = async (url: string) => {
   const waitForPageLoad = () => {
     return new Promise((resolve) => {
@@ -271,6 +71,99 @@ const extractHtml = async (url: string) => {
   };
 };
 
+const captureScreenshot = async (url: string) => {
+  const waitForPageLoad = () => {
+    return new Promise((resolve) => {
+      if (document.readyState === "complete") {
+        resolve(null);
+      } else {
+        document.addEventListener("readystatechange", () => {
+          if (document.readyState === "complete") {
+            resolve(null);
+          }
+        });
+      }
+    });
+  };
+
+  const getPageDimensions = () => {
+    return {
+      width: Math.max(
+        document.documentElement.scrollWidth,
+        document.body.scrollWidth,
+        document.documentElement.offsetWidth,
+        document.body.offsetWidth,
+        document.documentElement.clientWidth
+      ),
+      height: Math.max(
+        document.documentElement.scrollHeight,
+        document.body.scrollHeight,
+        document.documentElement.offsetHeight,
+        document.body.offsetHeight,
+        document.documentElement.clientHeight
+      ),
+    };
+  };
+
+  console.log(`Capturing screenshot for: ${url}`);
+
+  const tab = await chrome.tabs.create({ url });
+
+  if (!tab.id) {
+    throw new Error("Failed to create tab");
+  }
+
+  await Promise.race([
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: waitForPageLoad,
+    }),
+    new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+  ]);
+
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+
+  // Get page dimensions
+  const dimensions = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: getPageDimensions,
+  });
+
+  const { width, height } = dimensions[0].result || {
+    width: 1920,
+    height: 1080,
+  };
+
+  // Capture the screenshot
+  const screenshot = await chrome.tabs.captureVisibleTab(tab.id, {
+    format: "png",
+    quality: 100,
+  });
+
+  // If the page is larger than the viewport, we need to capture it in parts
+  let fullScreenshot = screenshot;
+
+  if (height > 800) {
+    // If page height is greater than typical viewport
+    // For now, we'll capture the visible area
+    // In a more advanced implementation, you could scroll and stitch multiple screenshots
+    console.log("Page is taller than viewport, capturing visible area only");
+  }
+
+  const currentUrl = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => window.location.href,
+  });
+
+  await chrome.tabs.remove(tab.id);
+
+  return {
+    screenshot: fullScreenshot,
+    dimensions: { width, height },
+    url: currentUrl[0].result,
+  };
+};
+
 class WebSocketManager {
   url: string;
   ws: WebSocket | null;
@@ -307,26 +200,16 @@ class WebSocketManager {
           })
         );
       } else if (type == "captureScreenshot") {
-        console.log("Received screenshot request");
-        let screenshotData = [];
+        console.log("Received captureScreenshot request");
+        let mergedData = [];
         for (const url of urls) {
-          try {
-            const result = await captureFullPageScreenshot(url);
-            screenshotData.push(result);
-          } catch (error) {
-            console.error(`Failed to capture screenshot for ${url}:`, error);
-            screenshotData.push({
-              url,
-              error: (error as Error).message,
-              screenshots: []
-            });
-          }
+          mergedData.push(await captureScreenshot(url));
         }
-        console.log("Sending screenshot response");
+        console.log("Sending captureScreenshot response");
         this.send(
           JSON.stringify({
             type: "captureScreenshot",
-            results: screenshotData,
+            results: mergedData,
             request_id,
           })
         );
