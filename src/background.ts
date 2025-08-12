@@ -50,73 +50,70 @@ const captureFullPageScreenshot = async (url: string) => {
       "Page.getLayoutMetrics"
     ) as any;
 
-    const { width, height } = metrics.contentSize;
-    const viewportWidth = Math.ceil(width);
-    const viewportHeight = Math.ceil(height);
+    const { width: contentWidth, height: contentHeight } = metrics.contentSize;
+    const fullWidth = Math.ceil(contentWidth);
+    const fullHeight = Math.ceil(contentHeight);
 
-    console.log(`Page dimensions: ${viewportWidth}x${viewportHeight}`);
+    console.log(`Page dimensions: ${fullWidth}x${fullHeight}`);
 
-    // Set device metrics to capture full page
-    await chrome.debugger.sendCommand(
-      { tabId: tab.id },
-      "Emulation.setDeviceMetricsOverride",
-      {
-        width: viewportWidth,
-        height: viewportHeight,
-        deviceScaleFactor: 1,
-        mobile: false,
-        screenWidth: viewportWidth,
-        screenHeight: viewportHeight,
-        positionX: 0,
-        positionY: 0,
-        dontSetVisibleSize: false,
-        screenOrientation: {
-          type: "portraitPrimary",
-          angle: 0
-        }
-      }
-    );
+    // Chrome has limitations on viewport size, so we'll capture in segments if needed
+    const maxViewportSize = 8192; // Safe maximum for Chrome
+    const segmentHeight = Math.min(fullHeight, maxViewportSize);
+    const segmentWidth = Math.min(fullWidth, maxViewportSize);
+    
+    // Calculate number of segments needed
+    const verticalSegments = Math.ceil(fullHeight / segmentHeight);
+    const horizontalSegments = Math.ceil(fullWidth / segmentWidth);
+    
+    console.log(`Will capture in ${verticalSegments} vertical x ${horizontalSegments} horizontal segments`);
 
-    // Wait for the viewport change to take effect
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    // Scroll to ensure all lazy-loaded content is visible
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        window.scrollTo(0, document.body.scrollHeight);
-        return new Promise(resolve => {
-          setTimeout(() => {
-            window.scrollTo(0, 0);
-            setTimeout(resolve, 500);
-          }, 500);
+    const screenshots = [];
+    
+    // Capture each segment
+    for (let vSeg = 0; vSeg < verticalSegments; vSeg++) {
+      for (let hSeg = 0; hSeg < horizontalSegments; hSeg++) {
+        const x = hSeg * segmentWidth;
+        const y = vSeg * segmentHeight;
+        const captureWidth = Math.min(segmentWidth, fullWidth - x);
+        const captureHeight = Math.min(segmentHeight, fullHeight - y);
+        
+        console.log(`Capturing segment ${vSeg * horizontalSegments + hSeg + 1}/${verticalSegments * horizontalSegments} at (${x}, ${y}) with size ${captureWidth}x${captureHeight}`);
+        
+        // Set viewport for this segment
+        await chrome.debugger.sendCommand(
+          { tabId: tab.id },
+          "Emulation.setDeviceMetricsOverride",
+          {
+            width: captureWidth,
+            height: captureHeight,
+            deviceScaleFactor: 1,
+            mobile: false,
+            screenWidth: captureWidth,
+            screenHeight: captureHeight,
+            positionX: 0,
+            positionY: 0,
+            dontSetVisibleSize: false,
+            screenOrientation: {
+              type: "portraitPrimary",
+              angle: 0
+            }
+          }
+        );
+        
+        // Scroll to the segment position
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: (scrollX: number, scrollY: number) => {
+            window.scrollTo(scrollX, scrollY);
+          },
+          args: [x, y]
         });
-      }
-    });
-
-    // Additional wait for any animations to complete
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
-    // Capture the full page screenshot with fallback options
-    let screenshot;
-    try {
-      // First attempt with captureBeyondViewport
-      screenshot = await chrome.debugger.sendCommand(
-        { tabId: tab.id },
-        "Page.captureScreenshot",
-        {
-          format: "png",
-          quality: 90,
-          captureBeyondViewport: true,
-          fromSurface: false
-        }
-      ) as any;
-    } catch (firstError) {
-      console.warn("First screenshot attempt failed, trying with clip:", firstError);
-      
-      // Fallback: try with explicit clip and no captureBeyondViewport
-      try {
-        screenshot = await chrome.debugger.sendCommand(
+        
+        // Wait for render
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Capture this segment
+        const screenshot = await chrome.debugger.sendCommand(
           { tabId: tab.id },
           "Page.captureScreenshot",
           {
@@ -125,15 +122,20 @@ const captureFullPageScreenshot = async (url: string) => {
             clip: {
               x: 0,
               y: 0,
-              width: Math.min(viewportWidth, 16384), // Chrome has max dimensions
-              height: Math.min(viewportHeight, 16384),
+              width: captureWidth,
+              height: captureHeight,
               scale: 1
             }
           }
         ) as any;
-      } catch (secondError) {
-        console.error("Both screenshot attempts failed:", secondError);
-        throw secondError;
+        
+        screenshots.push({
+          data: screenshot.data,
+          x,
+          y,
+          width: captureWidth,
+          height: captureHeight
+        });
       }
     }
 
@@ -149,14 +151,31 @@ const captureFullPageScreenshot = async (url: string) => {
     // Close the tab
     await chrome.tabs.remove(tab.id);
 
-    // Convert base64 to data URL
-    const dataUrl = `data:image/png;base64,${screenshot.data}`;
+    // If we only have one segment, return it directly
+    if (screenshots.length === 1) {
+      const dataUrl = `data:image/png;base64,${screenshots[0].data}`;
+      return {
+        screenshots: [dataUrl],
+        url: currentUrl[0].result,
+        dimensions: { width: fullWidth, height: fullHeight },
+        segmentCount: 1
+      };
+    }
 
+    // Otherwise, return all segments for server-side stitching
+    const dataUrls = screenshots.map(s => `data:image/png;base64,${s.data}`);
+    
     return {
-      screenshots: [dataUrl],
+      screenshots: dataUrls,
       url: currentUrl[0].result,
-      dimensions: { width: viewportWidth, height: viewportHeight },
-      segmentCount: 1
+      dimensions: { width: fullWidth, height: fullHeight },
+      segmentCount: screenshots.length,
+      segments: screenshots.map(s => ({
+        x: s.x,
+        y: s.y,
+        width: s.width,
+        height: s.height
+      }))
     };
   } catch (error) {
     console.error("Screenshot capture failed:", error);

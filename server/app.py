@@ -44,17 +44,54 @@ def echo(sock):
             break
 
 
-def process_screenshot(screenshot_data_url):
-    """Process a single full-page screenshot."""
-    if not screenshot_data_url:
+def process_screenshot(result):
+    """Process screenshot segments and stitch them together if needed."""
+    if not result.get("screenshots"):
         return None
     
-    # Remove data URL prefix
-    img_data = screenshot_data_url.split(",")[1]
-    img_bytes = base64.b64decode(img_data)
-    img = Image.open(io.BytesIO(img_bytes))
+    screenshots = result["screenshots"]
+    segments_info = result.get("segments", [])
+    dimensions = result.get("dimensions", {})
     
-    return img
+    # If we only have one screenshot, return it directly
+    if len(screenshots) == 1:
+        img_data = screenshots[0].split(",")[1]
+        img_bytes = base64.b64decode(img_data)
+        return Image.open(io.BytesIO(img_bytes))
+    
+    # Multiple segments - need to stitch them together
+    full_width = dimensions.get("width", 0)
+    full_height = dimensions.get("height", 0)
+    
+    if not full_width or not full_height:
+        # Fallback: return the first segment if dimensions are missing
+        img_data = screenshots[0].split(",")[1]
+        img_bytes = base64.b64decode(img_data)
+        return Image.open(io.BytesIO(img_bytes))
+    
+    # Create a new image with the full dimensions
+    stitched_image = Image.new("RGB", (full_width, full_height), color="white")
+    
+    # Paste each segment into the correct position
+    for i, screenshot_data in enumerate(screenshots):
+        # Get segment info
+        if i < len(segments_info):
+            segment = segments_info[i]
+            x = segment.get("x", 0)
+            y = segment.get("y", 0)
+        else:
+            # Fallback if segment info is missing
+            x = 0
+            y = 0
+        
+        # Decode and paste the segment
+        img_data = screenshot_data.split(",")[1]
+        img_bytes = base64.b64decode(img_data)
+        segment_img = Image.open(io.BytesIO(img_bytes))
+        
+        stitched_image.paste(segment_img, (x, y))
+    
+    return stitched_image
 
 
 @app.route("/screenshot", methods=["POST"])
@@ -112,8 +149,8 @@ def capture_screenshot():
             if "error" in result:
                 results.append({"url": result["url"], "error": result["error"]})
             else:
-                # Process the single full-page screenshot
-                screenshot_image = process_screenshot(result["screenshots"][0] if result["screenshots"] else None)
+                # Process the screenshot (handles both single and multi-segment)
+                screenshot_image = process_screenshot(result)
 
                 if screenshot_image:
                     # Generate filename
