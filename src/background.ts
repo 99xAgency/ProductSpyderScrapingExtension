@@ -44,9 +44,6 @@ const captureFullPageScreenshot = async (url: string) => {
     await chrome.debugger.sendCommand({ tabId: tab.id }, "Runtime.enable");
     await chrome.debugger.sendCommand({ tabId: tab.id }, "DOM.enable");
 
-    // Wait for page to be fully loaded
-    await chrome.debugger.sendCommand({ tabId: tab.id }, "Page.loadEventFired");
-
     // Get page metrics for full page dimensions
     const metrics = await chrome.debugger.sendCommand(
       { tabId: tab.id },
