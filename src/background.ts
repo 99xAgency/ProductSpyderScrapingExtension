@@ -1,7 +1,7 @@
 const captureFullPageScreenshot = async (url: string) => {
   console.log(`Capturing screenshot: ${url}`);
 
-  const tab = await chrome.tabs.create({ url });
+  const tab = await chrome.tabs.create({ url, active: false });
 
   if (!tab.id) {
     throw new Error("Failed to create tab");
@@ -12,30 +12,40 @@ const captureFullPageScreenshot = async (url: string) => {
       if (document.readyState === "complete") {
         resolve(null);
       } else {
-        document.addEventListener("readystatechange", () => {
+        const handler = () => {
           if (document.readyState === "complete") {
+            document.removeEventListener("readystatechange", handler);
             resolve(null);
           }
-        });
+        };
+        document.addEventListener("readystatechange", handler);
       }
     });
   };
 
-  // Wait for page to load
-  await Promise.race([
-    chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: waitForPageLoad,
-    }),
-    new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
-  ]);
-
-  // Additional wait for dynamic content
-  await new Promise((resolve) => setTimeout(resolve, 3000));
-
   try {
+    // Wait for page to load
+    await Promise.race([
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: waitForPageLoad,
+      }),
+      new Promise((resolve) => setTimeout(() => resolve(null), 15000)),
+    ]);
+
+    // Additional wait for dynamic content to render
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
     // Attach debugger to the tab
     await chrome.debugger.attach({ tabId: tab.id }, "1.3");
+
+    // Enable necessary domains
+    await chrome.debugger.sendCommand({ tabId: tab.id }, "Page.enable");
+    await chrome.debugger.sendCommand({ tabId: tab.id }, "Runtime.enable");
+    await chrome.debugger.sendCommand({ tabId: tab.id }, "DOM.enable");
+
+    // Wait for page to be fully loaded
+    await chrome.debugger.sendCommand({ tabId: tab.id }, "Page.loadEventFired");
 
     // Get page metrics for full page dimensions
     const metrics = await chrome.debugger.sendCommand(
@@ -44,21 +54,47 @@ const captureFullPageScreenshot = async (url: string) => {
     ) as any;
 
     const { width, height } = metrics.contentSize;
+    const viewportWidth = Math.ceil(width);
+    const viewportHeight = Math.ceil(height);
+
+    console.log(`Page dimensions: ${viewportWidth}x${viewportHeight}`);
 
     // Set device metrics to capture full page
     await chrome.debugger.sendCommand(
       { tabId: tab.id },
       "Emulation.setDeviceMetricsOverride",
       {
-        width: Math.ceil(width),
-        height: Math.ceil(height),
+        width: viewportWidth,
+        height: viewportHeight,
         deviceScaleFactor: 1,
         mobile: false,
+        screenWidth: viewportWidth,
+        screenHeight: viewportHeight,
+        positionX: 0,
+        positionY: 0,
+        dontSetVisibleSize: false,
+        screenOrientation: {
+          type: "portraitPrimary",
+          angle: 0
+        }
       }
     );
 
-    // Wait a bit for the metrics to apply
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    // Wait for the viewport change to take effect
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Force a layout update
+    await chrome.debugger.sendCommand(
+      { tabId: tab.id },
+      "Page.setDocumentContent",
+      {
+        frameId: (await chrome.debugger.sendCommand({ tabId: tab.id }, "Page.getFrameTree") as any).frameTree.frame.id,
+        html: await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => document.documentElement.outerHTML,
+        }).then(r => r[0].result)
+      }
+    ).catch(() => {}); // Ignore if this fails
 
     // Capture the full page screenshot
     const screenshot = await chrome.debugger.sendCommand(
@@ -66,7 +102,16 @@ const captureFullPageScreenshot = async (url: string) => {
       "Page.captureScreenshot",
       {
         format: "png",
+        quality: 100,
         captureBeyondViewport: true,
+        fromSurface: true,
+        clip: {
+          x: 0,
+          y: 0,
+          width: viewportWidth,
+          height: viewportHeight,
+          scale: 1
+        }
       }
     ) as any;
 
@@ -88,86 +133,22 @@ const captureFullPageScreenshot = async (url: string) => {
     return {
       screenshots: [dataUrl],
       url: currentUrl[0].result,
-      dimensions: { width: Math.ceil(width), height: Math.ceil(height) },
+      dimensions: { width: viewportWidth, height: viewportHeight },
       segmentCount: 1
     };
   } catch (error) {
-    // If debugger fails, fallback to the old method
-    console.warn("Debugger method failed, falling back to viewport capture:", error);
+    console.error("Screenshot capture failed:", error);
     
-    // Detach debugger if it's still attached
+    // Ensure cleanup
     try {
       await chrome.debugger.detach({ tabId: tab.id });
     } catch {}
+    
+    try {
+      await chrome.tabs.remove(tab.id);
+    } catch {}
 
-    // Get page dimensions
-    const dimensions = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        const body = document.body;
-        const html = document.documentElement;
-        return {
-          width: Math.max(
-            body.scrollWidth,
-            body.offsetWidth,
-            html.clientWidth,
-            html.scrollWidth,
-            html.offsetWidth
-          ),
-          height: Math.max(
-            body.scrollHeight,
-            body.offsetHeight,
-            html.clientHeight,
-            html.scrollHeight,
-            html.offsetHeight
-          ),
-          viewportHeight: window.innerHeight,
-          viewportWidth: window.innerWidth
-        };
-      },
-    });
-
-    const { width, height, viewportHeight } = dimensions[0].result as any;
-    const screenshots: string[] = [];
-    let currentPosition = 0;
-
-    // Capture screenshots in segments
-    while (currentPosition < height) {
-      // Scroll to position
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: (position: number) => {
-          window.scrollTo(0, position);
-        },
-        args: [currentPosition]
-      });
-
-      // Wait for scroll to settle
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Capture visible area
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId!, {
-        format: 'png'
-      });
-      
-      screenshots.push(dataUrl);
-      currentPosition += viewportHeight;
-    }
-
-    // Get current URL (in case of redirects)
-    const currentUrl = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => window.location.href,
-    });
-
-    await chrome.tabs.remove(tab.id);
-
-    return {
-      screenshots,
-      url: currentUrl[0].result,
-      dimensions: { width, height },
-      segmentCount: screenshots.length
-    };
+    throw new Error(`Failed to capture screenshot: ${(error as Error).message}`);
   }
 };
 

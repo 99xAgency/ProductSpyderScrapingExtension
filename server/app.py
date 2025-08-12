@@ -44,47 +44,17 @@ def echo(sock):
             break
 
 
-def stitch_screenshots(screenshot_data_urls, dimensions):
-    """Stitch multiple screenshot segments into a single full-page image."""
-    images = []
-
-    for data_url in screenshot_data_urls:
-        # Remove data URL prefix
-        img_data = data_url.split(",")[1]
-        img_bytes = base64.b64decode(img_data)
-        img = Image.open(io.BytesIO(img_bytes))
-        images.append(img)
-
-    if not images:
+def process_screenshot(screenshot_data_url):
+    """Process a single full-page screenshot."""
+    if not screenshot_data_url:
         return None
-
-    # Create a new image with the full page dimensions
-    height = dimensions["height"]
-
-    # Use the width from the first image to ensure consistency
-    actual_width = images[0].width
-
-    # Create the full image
-    full_image = Image.new("RGB", (actual_width, height))
-
-    # Paste each segment
-    current_y = 0
-    for i, img in enumerate(images):
-        # For the last image, only paste the remaining part
-        if i == len(images) - 1:
-            remaining_height = height - current_y
-            if remaining_height < img.height:
-                # Crop the last image to fit
-                img = img.crop((0, img.height - remaining_height, img.width, img.height))
-
-        full_image.paste(img, (0, current_y))
-        current_y += img.height
-
-        # Break if we've covered the full height
-        if current_y >= height:
-            break
-
-    return full_image
+    
+    # Remove data URL prefix
+    img_data = screenshot_data_url.split(",")[1]
+    img_bytes = base64.b64decode(img_data)
+    img = Image.open(io.BytesIO(img_bytes))
+    
+    return img
 
 
 @app.route("/screenshot", methods=["POST"])
@@ -142,17 +112,17 @@ def capture_screenshot():
             if "error" in result:
                 results.append({"url": result["url"], "error": result["error"]})
             else:
-                # Stitch screenshots together
-                full_image = stitch_screenshots(result["screenshots"], result["dimensions"])
+                # Process the single full-page screenshot
+                screenshot_image = process_screenshot(result["screenshots"][0] if result["screenshots"] else None)
 
-                if full_image:
+                if screenshot_image:
                     # Generate filename
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     filename = f"screenshot_{timestamp}_{uuid.uuid4().hex[:8]}.png"
                     filepath = screenshots_dir / filename
 
                     # Save the image
-                    full_image.save(filepath, "PNG")
+                    screenshot_image.save(filepath, "PNG")
 
                     results.append(
                         {
@@ -160,11 +130,10 @@ def capture_screenshot():
                             "filename": filename,
                             "path": str(filepath),
                             "dimensions": result["dimensions"],
-                            "segments": result["segmentCount"],
                         }
                     )
                 else:
-                    results.append({"url": result["url"], "error": "Failed to stitch screenshots"})
+                    results.append({"url": result["url"], "error": "Failed to process screenshot"})
 
         return jsonify({"screenshots": results})
 
