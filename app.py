@@ -45,6 +45,7 @@ async def wait_for_page_load(tab: zd.Tab) -> bool:
     )
     try:
         await asyncio.wait_for(wait_fut, timeout=15)
+        await asyncio.sleep(3)
         return True
     except asyncio.TimeoutError:
         return False
@@ -64,8 +65,6 @@ async def extract(request: URLRequest):
         await asyncio.sleep(1)
 
         await wait_for_page_load(tab)
-
-        await asyncio.sleep(1)
 
         url = await tab.evaluate("window.location.href")
         status_code = 200
@@ -92,8 +91,6 @@ async def screenshot(request: URLRequest):
         await asyncio.sleep(1)
 
         await wait_for_page_load(tab)
-
-        await asyncio.sleep(1)
 
         file_name = f"screenshot_{str(uuid4()).split('-')[0]}.png"
 
