@@ -29,28 +29,65 @@ async def lifespan(app: FastAPI):
 
 async def wait_for_page_load(tab: zd.Tab) -> bool:
     try:
-        # Wait for DOM to be ready and body to exist
+        # Wait for network to be idle (no pending requests) with timeout
         await tab.evaluate(
             expression="""
             new Promise((resolve) => {
-                if (document.readyState === 'complete' && document.body) {
+                let pendingRequests = 0;
+                let idleTimer = null;
+                let timeoutId = null;
+                
+                // Set maximum wait time (10 seconds)
+                const MAX_WAIT_TIME = 10000;
+                timeoutId = setTimeout(() => {
+                    console.log('Timeout reached, resolving...');
                     resolve(true);
-                } else {
-                    const checkReady = () => {
-                        if (document.readyState === 'complete' && document.body) {
-                            resolve(true);
-                        } else {
-                            setTimeout(checkReady, 100);
+                }, MAX_WAIT_TIME);
+                
+                // Monitor fetch requests
+                const originalFetch = window.fetch;
+                window.fetch = function(...args) {
+                    pendingRequests++;
+                    return originalFetch.apply(this, args).finally(() => {
+                        pendingRequests--;
+                        if (pendingRequests === 0) {
+                            clearTimeout(idleTimer);
+                            idleTimer = setTimeout(() => {
+                                clearTimeout(timeoutId);
+                                resolve(true);
+                            }, 1000); // Wait 1 second after last request
                         }
-                    };
-                    checkReady();
+                    });
+                };
+                
+                // Monitor XMLHttpRequest
+                const originalXHROpen = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(...args) {
+                    pendingRequests++;
+                    this.addEventListener('loadend', () => {
+                        pendingRequests--;
+                        if (pendingRequests === 0) {
+                            clearTimeout(idleTimer);
+                            idleTimer = setTimeout(() => {
+                                clearTimeout(timeoutId);
+                                resolve(true);
+                            }, 1000); // Wait 1 second after last request
+                        }
+                    });
+                    return originalXHROpen.apply(this, args);
+                };
+                
+                // If no requests are made initially, resolve quickly
+                if (pendingRequests === 0) {
+                    setTimeout(() => {
+                        clearTimeout(timeoutId);
+                        resolve(true);
+                    }, 500);
                 }
             });
             """,
             await_promise=True,
         )
-
-        await asyncio.sleep(5)
 
         return True
 
