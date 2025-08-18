@@ -29,61 +29,51 @@ async def lifespan(app: FastAPI):
 
 async def wait_for_page_load(tab: zd.Tab) -> bool:
     try:
-        # Wait for network to be idle (no pending requests) with timeout
+        # First wait for basic DOM readiness
         await tab.evaluate(
             expression="""
             new Promise((resolve) => {
-                let pendingRequests = 0;
-                let idleTimer = null;
-                let timeoutId = null;
+                if (document.readyState === 'complete' && document.body) {
+                    resolve(true);
+                } else {
+                    window.addEventListener('load', () => resolve(true));
+                }
+            });
+            """,
+            await_promise=True,
+        )
+
+        # Then wait for content to stabilize (no new elements for 2 seconds)
+        await tab.evaluate(
+            expression="""
+            new Promise((resolve) => {
+                let lastElementCount = document.body.children.length;
+                let stableCount = 0;
+                let checkInterval;
+                let timeoutId;
                 
-                // Set maximum wait time (10 seconds)
-                const MAX_WAIT_TIME = 10000;
+                // Set maximum wait time (15 seconds)
                 timeoutId = setTimeout(() => {
+                    clearInterval(checkInterval);
                     console.log('Timeout reached, resolving...');
                     resolve(true);
-                }, MAX_WAIT_TIME);
+                }, 15000);
                 
-                // Monitor fetch requests
-                const originalFetch = window.fetch;
-                window.fetch = function(...args) {
-                    pendingRequests++;
-                    return originalFetch.apply(this, args).finally(() => {
-                        pendingRequests--;
-                        if (pendingRequests === 0) {
-                            clearTimeout(idleTimer);
-                            idleTimer = setTimeout(() => {
-                                clearTimeout(timeoutId);
-                                resolve(true);
-                            }, 1000); // Wait 1 second after last request
+                checkInterval = setInterval(() => {
+                    const currentElementCount = document.body.children.length;
+                    
+                    if (currentElementCount === lastElementCount) {
+                        stableCount++;
+                        if (stableCount >= 4) { // 2 seconds (4 * 500ms)
+                            clearInterval(checkInterval);
+                            clearTimeout(timeoutId);
+                            resolve(true);
                         }
-                    });
-                };
-                
-                // Monitor XMLHttpRequest
-                const originalXHROpen = XMLHttpRequest.prototype.open;
-                XMLHttpRequest.prototype.open = function(...args) {
-                    pendingRequests++;
-                    this.addEventListener('loadend', () => {
-                        pendingRequests--;
-                        if (pendingRequests === 0) {
-                            clearTimeout(idleTimer);
-                            idleTimer = setTimeout(() => {
-                                clearTimeout(timeoutId);
-                                resolve(true);
-                            }, 1000); // Wait 1 second after last request
-                        }
-                    });
-                    return originalXHROpen.apply(this, args);
-                };
-                
-                // If no requests are made initially, resolve quickly
-                if (pendingRequests === 0) {
-                    setTimeout(() => {
-                        clearTimeout(timeoutId);
-                        resolve(true);
-                    }, 500);
-                }
+                    } else {
+                        stableCount = 0;
+                        lastElementCount = currentElementCount;
+                    }
+                }, 500);
             });
             """,
             await_promise=True,
@@ -93,6 +83,8 @@ async def wait_for_page_load(tab: zd.Tab) -> bool:
 
     except Exception as e:
         print(f"Error waiting for page load: {e}")
+        # Fallback: wait a bit and return
+        await asyncio.sleep(3)
         return False
 
 
