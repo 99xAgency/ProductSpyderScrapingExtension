@@ -43,35 +43,7 @@ async def wait_for_page_load(tab: zd.Tab) -> bool:
             await_promise=True,
         )
 
-        # Wait for network to be idle (no requests for 2 seconds)
-        await tab.evaluate(
-            expression="""
-            new Promise((resolve) => {
-                let requestCount = 0;
-                let idleTimer = null;
-                
-                const observer = new PerformanceObserver((list) => {
-                    for (const entry of list.getEntries()) {
-                        if (entry.entryType === 'resource') {
-                            requestCount++;
-                            clearTimeout(idleTimer);
-                            idleTimer = setTimeout(() => {
-                                if (requestCount === 0) {
-                                    resolve(true);
-                                }
-                            }, 2000);
-                        }
-                    }
-                });
-                
-                observer.observe({ entryTypes: ['resource'] });
-                
-                // Fallback: resolve after 5 seconds if no network activity
-                setTimeout(() => resolve(true), 5000);
-            });
-            """,
-            await_promise=True,
-        )
+        await asyncio.sleep(5)
 
         return True
 
