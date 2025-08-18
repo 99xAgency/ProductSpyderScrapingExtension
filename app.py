@@ -29,28 +29,33 @@ async def lifespan(app: FastAPI):
 
 async def wait_for_page_load(tab: zd.Tab) -> bool:
     try:
-        # Wait for initial page load
+        # Wait for DOM to be ready and body to exist
         await tab.evaluate(
             expression="""
             new Promise((resolve) => {
-                if (document.readyState === 'complete') {
+                if (document.readyState === 'complete' && document.body) {
                     resolve(true);
                 } else {
-                    window.addEventListener('load', () => resolve(true));
+                    const checkReady = () => {
+                        if (document.readyState === 'complete' && document.body) {
+                            resolve(true);
+                        } else {
+                            setTimeout(checkReady, 100);
+                        }
+                    };
+                    checkReady();
                 }
             });
             """,
             await_promise=True,
         )
 
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
 
         return True
 
     except Exception as e:
         print(f"Error waiting for page load: {e}")
-        # Fallback: wait a bit more and return
-        await asyncio.sleep(3)
         return False
 
 
