@@ -38,7 +38,7 @@ async def wait_for_page_load(tab: zd.Tab) -> bool:
                 let timeoutId = null;
                 
                 // Set maximum wait time (12 seconds)
-                const MAX_WAIT_TIME = 12000;
+                const MAX_WAIT_TIME = 20000;
                 timeoutId = setTimeout(() => {
                     console.log('Network timeout reached, resolving...');
                     resolve(true);
