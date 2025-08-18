@@ -48,6 +48,7 @@ async def wait_for_page_load(tab: zd.Tab) -> bool:
         await asyncio.sleep(3)
         return True
     except asyncio.TimeoutError:
+        print("TimeoutError")
         return False
 
 
