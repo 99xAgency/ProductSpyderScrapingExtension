@@ -73,9 +73,6 @@ async def wait_for_page_load(tab: zd.Tab) -> bool:
             await_promise=True,
         )
 
-        # Additional wait for any remaining dynamic content
-        await asyncio.sleep(2)
-
         return True
 
     except Exception as e:
@@ -95,8 +92,6 @@ async def extract(request: URLRequest):
 
     try:
         tab = await browser.get(url, new_tab=True)
-
-        await asyncio.sleep(1)
 
         await wait_for_page_load(tab)
 
@@ -121,8 +116,6 @@ async def screenshot(request: URLRequest):
 
     try:
         tab = await browser.get(url, new_tab=True)
-
-        await asyncio.sleep(1)
 
         await wait_for_page_load(tab)
 
