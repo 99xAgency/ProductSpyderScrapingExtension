@@ -11,8 +11,7 @@ from pydantic import BaseModel
 
 load_dotenv()
 
-browser_pool = []
-browser_semaphore = None
+browser = None
 
 
 class URLRequest(BaseModel):
@@ -21,42 +20,15 @@ class URLRequest(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global browser_pool, browser_semaphore
-    
-    # Create 2 browser instances
-    browser_semaphore = asyncio.Semaphore(2)
-    for i in range(2):
-        browser = await zd.start(user_data_dir=os.getenv("USER_DATA_DIR"))
-        browser_pool.append(browser)
-    
+    global browser
+    browser = await zd.start(user_data_dir=os.getenv("USER_DATA_DIR"))
     yield
-    
-    # Clean up browsers
-    for browser in browser_pool:
-        if browser:
-            await browser.stop()
-    browser_pool.clear()
-
-
-async def get_browser():
-    """Get an available browser from the pool"""
-    await browser_semaphore.acquire()
-    try:
-        # Return the first available browser (simple round-robin)
-        return browser_pool[len(browser_pool) - browser_semaphore._value - 1]
-    except IndexError:
-        # Fallback to first browser if calculation fails
-        return browser_pool[0]
-
-
-def release_browser():
-    """Release a browser back to the pool"""
-    browser_semaphore.release()
+    if browser:
+        await browser.stop()
 
 
 async def wait_for_page_load(tab: zd.Tab) -> bool:
     try:
-        # Wait for initial page load
         await tab.evaluate(
             expression="""
             new Promise((resolve) => {
@@ -88,10 +60,8 @@ app = FastAPI(lifespan=lifespan)
 async def extract(request: URLRequest):
     url = request.url
     tab = None
-    browser = None
 
     try:
-        browser = await get_browser()
         tab = await browser.get(url, new_tab=True)
 
         await wait_for_page_load(tab)
@@ -108,18 +78,14 @@ async def extract(request: URLRequest):
     finally:
         if tab:
             await tab.close()
-        if browser:
-            release_browser()
 
 
 @app.post("/screenshot")
 async def screenshot(request: URLRequest):
     url = request.url
     tab = None
-    browser = None
 
     try:
-        browser = await get_browser()
         tab = await browser.get(url, new_tab=True)
 
         await wait_for_page_load(tab)
@@ -136,8 +102,6 @@ async def screenshot(request: URLRequest):
     finally:
         if tab:
             await tab.close()
-        if browser:
-            release_browser()
 
 
 @app.get("/screenshots/{file_name}")
