@@ -28,27 +28,60 @@ async def lifespan(app: FastAPI):
 
 
 async def wait_for_page_load(tab: zd.Tab) -> bool:
-    wait_fut = tab.evaluate(
-        expression="""
-        new Promise((resolve) => {
-            const checkReady = () => {
-                if (document.readyState === 'complete' && document.body) {
+    try:
+        # Wait for initial page load
+        await tab.evaluate(
+            expression="""
+            new Promise((resolve) => {
+                if (document.readyState === 'complete') {
                     resolve(true);
                 } else {
-                    setTimeout(checkReady, 100);
+                    window.addEventListener('load', () => resolve(true));
                 }
-            };
-            checkReady();
-        });
-        """,
-        await_promise=True,
-    )
-    try:
-        await asyncio.wait_for(wait_fut, timeout=15)
-        await asyncio.sleep(3)
+            });
+            """,
+            await_promise=True,
+        )
+
+        # Wait for network to be idle (no requests for 2 seconds)
+        await tab.evaluate(
+            expression="""
+            new Promise((resolve) => {
+                let requestCount = 0;
+                let idleTimer = null;
+                
+                const observer = new PerformanceObserver((list) => {
+                    for (const entry of list.getEntries()) {
+                        if (entry.entryType === 'resource') {
+                            requestCount++;
+                            clearTimeout(idleTimer);
+                            idleTimer = setTimeout(() => {
+                                if (requestCount === 0) {
+                                    resolve(true);
+                                }
+                            }, 2000);
+                        }
+                    }
+                });
+                
+                observer.observe({ entryTypes: ['resource'] });
+                
+                // Fallback: resolve after 5 seconds if no network activity
+                setTimeout(() => resolve(true), 5000);
+            });
+            """,
+            await_promise=True,
+        )
+
+        # Additional wait for any remaining dynamic content
+        await asyncio.sleep(2)
+
         return True
-    except asyncio.TimeoutError:
-        print("TimeoutError")
+
+    except Exception as e:
+        print(f"Error waiting for page load: {e}")
+        # Fallback: wait a bit more and return
+        await asyncio.sleep(3)
         return False
 
 
