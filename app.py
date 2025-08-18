@@ -29,55 +29,24 @@ async def lifespan(app: FastAPI):
 
 async def wait_for_page_load(tab: zd.Tab) -> bool:
     try:
-        # First wait for basic DOM readiness
+        # Simple polling approach - wait for document.readyState to be 'complete'
         await tab.evaluate(
             expression="""
             new Promise((resolve) => {
-                if (document.readyState === 'complete' && document.body) {
-                    resolve(true);
-                } else {
-                    window.addEventListener('load', () => resolve(true));
-                }
+                const checkReady = () => {
+                    if (document.readyState === 'complete') {
+                        resolve(true);
+                    } else {
+                        setTimeout(checkReady, 100);
+                    }
+                };
+                checkReady();
             });
             """,
             await_promise=True,
         )
 
-        # Then wait for content to stabilize (no new elements for 2 seconds)
-        await tab.evaluate(
-            expression="""
-            new Promise((resolve) => {
-                let lastElementCount = document.body.children.length;
-                let stableCount = 0;
-                let checkInterval;
-                let timeoutId;
-                
-                // Set maximum wait time (15 seconds)
-                timeoutId = setTimeout(() => {
-                    clearInterval(checkInterval);
-                    console.log('Timeout reached, resolving...');
-                    resolve(true);
-                }, 15000);
-                
-                checkInterval = setInterval(() => {
-                    const currentElementCount = document.body.children.length;
-                    
-                    if (currentElementCount === lastElementCount) {
-                        stableCount++;
-                        if (stableCount >= 4) { // 2 seconds (4 * 500ms)
-                            clearInterval(checkInterval);
-                            clearTimeout(timeoutId);
-                            resolve(true);
-                        }
-                    } else {
-                        stableCount = 0;
-                        lastElementCount = currentElementCount;
-                    }
-                }, 500);
-            });
-            """,
-            await_promise=True,
-        )
+        await asyncio.sleep(5)
 
         return True
 
