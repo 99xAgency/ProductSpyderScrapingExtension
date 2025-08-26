@@ -66,7 +66,7 @@ const extractHtml = async (url: string) => {
 
   return {
     html: html[0].result,
-    statusCode: statusCode[0].result,
+    status_code: statusCode[0].result,
     url: currentUrl[0].result,
   };
 };
