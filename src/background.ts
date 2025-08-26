@@ -93,11 +93,11 @@ class WebSocketManager {
     this.ws.onmessage = async (event) => {
       const { type, url, request_id } = JSON.parse(event.data);
       if (type == "extractHtml") {
-        const html = await extractHtml(url);
+        const extractedData = await extractHtml(url);
         this.send(
           JSON.stringify({
             type: "extractHtml",
-            result: html,
+            result: extractedData,
             request_id,
           })
         );
