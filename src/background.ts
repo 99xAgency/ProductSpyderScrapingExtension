@@ -71,6 +71,57 @@ const extractHtml = async (url: string) => {
   };
 };
 
+const captureScreenshot = async (url: string) => {
+  const waitForPageLoad = () => {
+    return new Promise((resolve) => {
+      if (document.readyState === "complete") {
+        resolve(null);
+      } else {
+        document.addEventListener("readystatechange", () => {
+          if (document.readyState === "complete") {
+            resolve(null);
+          }
+        });
+      }
+    });
+  };
+
+  console.log(`Capturing screenshot for: ${url}`);
+
+  const tab = await chrome.tabs.create({ url });
+
+  if (!tab.id) {
+    throw new Error("Failed to create tab");
+  }
+
+  await Promise.race([
+    chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: waitForPageLoad,
+    }),
+    new Promise((resolve) => setTimeout(() => resolve(null), 10000)),
+  ]);
+
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+
+  const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
+    format: 'png',
+    quality: 90
+  });
+
+  const currentUrl = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => window.location.href,
+  });
+
+  await chrome.tabs.remove(tab.id);
+
+  return {
+    screenshot: screenshot,
+    url: currentUrl[0].result,
+  };
+};
+
 class WebSocketManager {
   url: string;
   ws: WebSocket | null;
@@ -98,6 +149,15 @@ class WebSocketManager {
           JSON.stringify({
             type: "extractHtml",
             result: extractedData,
+            request_id,
+          })
+        );
+      } else if (type == "captureScreenshot") {
+        const screenshotData = await captureScreenshot(url);
+        this.send(
+          JSON.stringify({
+            type: "captureScreenshot",
+            result: screenshotData,
             request_id,
           })
         );

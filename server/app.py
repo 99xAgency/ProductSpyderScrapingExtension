@@ -115,7 +115,7 @@ def take_screenshot():
     for client in client_list[:]:  # Create a copy of the list to safely iterate
         print("Sending screenshot request to client")
         try:
-            client.send(json.dumps({"type": "takeScreenshot", "url": url, "request_id": request_id}))
+            client.send(json.dumps({"type": "captureScreenshot", "url": url, "request_id": request_id}))
             successful_send += 1
         except Exception:
             print("Removing client")
@@ -141,25 +141,35 @@ def take_screenshot():
         parsed_data = response_queue.get(timeout=300)
 
         # Save screenshot to file
-        if "screenshot" in parsed_data:
+        result = parsed_data.get("result", {})
+        if "screenshot" in result:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"screenshot_{timestamp}_{request_id[:8]}.png"
             filepath = os.path.join("screenshots", filename)
 
+            # Create screenshots directory if it doesn't exist
+            screenshots_dir = os.path.join(os.path.dirname(__file__), "screenshots")
+            os.makedirs(screenshots_dir, exist_ok=True)
+
             # Create full path
-            full_path = os.path.join(os.path.dirname(__file__), filepath)
+            full_path = os.path.join(screenshots_dir, filename)
 
             # Decode base64 image and save
             try:
                 # Remove data:image/png;base64, prefix if present
-                image_data = parsed_data["screenshot"]
+                image_data = result["screenshot"]
                 if image_data.startswith("data:image"):
                     image_data = image_data.split(",")[1]
 
                 with open(full_path, "wb") as f:
                     f.write(base64.b64decode(image_data))
 
-                return jsonify({"success": True, "screenshot_path": filepath, "filename": filename, "url": url})
+                return jsonify({
+                    "success": True, 
+                    "screenshot_path": filepath, 
+                    "filename": filename, 
+                    "url": result.get("url", url)
+                })
             except Exception as e:
                 return jsonify({"error": f"Failed to save screenshot: {str(e)}"}), 500
         else:
