@@ -34,7 +34,7 @@ const extractHtml = async (url: string, maxTimeout: number = 30000) => {
 
   let createdTab: chrome.tabs.Tab | undefined;
   let timeoutId: NodeJS.Timeout | undefined;
-  
+
   try {
     const timeoutPromise = new Promise((_, reject) => {
       timeoutId = setTimeout(() => {
@@ -133,7 +133,7 @@ const captureScreenshot = async (url: string, maxTimeout: number = 30000) => {
 
   let createdTab: chrome.tabs.Tab | undefined;
   let timeoutId: NodeJS.Timeout | undefined;
-  
+
   try {
     const timeoutPromise = new Promise((_, reject) => {
       timeoutId = setTimeout(() => {
@@ -160,8 +160,8 @@ const captureScreenshot = async (url: string, maxTimeout: number = 30000) => {
       await new Promise((resolve) => setTimeout(resolve, 3000));
 
       const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, {
-        format: 'png',
-        quality: 90
+        format: "png",
+        quality: 90,
       });
 
       const currentUrl = await chrome.scripting.executeScript({
@@ -227,7 +227,9 @@ class WebSocketManager {
           try {
             await chrome.tabs.get(tabId);
           } catch (error) {
-            console.log(`Tab ${tabId} no longer exists, removing from tracking`);
+            console.log(
+              `Tab ${tabId} no longer exists, removing from tracking`
+            );
             this.activeTabs.delete(tabId);
           }
         }
@@ -258,7 +260,7 @@ class WebSocketManager {
     this.ws.onmessage = async (event) => {
       try {
         const { type, url, request_id } = JSON.parse(event.data);
-        
+
         if (type == "extractHtml") {
           try {
             const extractedData = await extractHtml(url);
@@ -332,10 +334,59 @@ class WebSocketManager {
   }
 }
 
-new WebSocketManager("ws://127.0.0.1:9999/ws");
+const wsManager = new WebSocketManager("ws://127.0.0.1:9999/ws");
 
-chrome.runtime.onMessage.addListener((message, _, sendResponse) => {
-  if (message.action === "ping") {
-    sendResponse("pong");
+let keepAliveInterval: NodeJS.Timeout | undefined;
+
+const startKeepAlive = () => {
+  if (keepAliveInterval) {
+    clearInterval(keepAliveInterval);
   }
+
+  keepAliveInterval = setInterval(() => {
+    chrome.runtime.getPlatformInfo(() => {
+      if (chrome.runtime.lastError) {
+        console.error("Keep-alive check failed:", chrome.runtime.lastError);
+      } else {
+        console.log("Keep-alive: Extension is active");
+      }
+    });
+
+    if (wsManager.ws && wsManager.ws.readyState === WebSocket.OPEN) {
+      wsManager.send(JSON.stringify({ type: "ping", timestamp: Date.now() }));
+    }
+  }, 20000);
+};
+
+startKeepAlive();
+
+chrome.alarms.create("keep-alive", { periodInMinutes: 0.5 });
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "keep-alive") {
+    console.log("Keep-alive alarm triggered");
+    chrome.runtime.getPlatformInfo(() => {
+      if (chrome.runtime.lastError) {
+        console.error(
+          "Keep-alive alarm check failed:",
+          chrome.runtime.lastError
+        );
+      }
+    });
+  }
+});
+
+chrome.runtime.onSuspend.addListener(() => {
+  console.log("Extension is being suspended, attempting to prevent...");
+  startKeepAlive();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  console.log("Extension started");
+  startKeepAlive();
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  console.log("Extension installed/updated");
+  startKeepAlive();
 });
